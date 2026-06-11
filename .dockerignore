@@ -1,0 +1,39 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Logs and runtime files
+*.log
+*.sqlite3
+*.db
+*.pid
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (ignore previous builds)
+docker-compose.override.yml
+*.swp
+
+# Git files
+.git
+.gitignore
+*.orig
+
+# Tests and development scripts (optional)
+tests/
+*.pytest_cache/
+.coverage
+test_*
+
+# IDE/editor files
+.vscode/
+.idea/
+*.iml
+
+# environment files
+.env
+.env.*
