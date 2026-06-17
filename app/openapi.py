@@ -1,4 +1,5 @@
 import json
+from functools import lru_cache
 from typing import Any
 
 from fastapi import FastAPI, Response
@@ -8,6 +9,11 @@ from fastapi.responses import HTMLResponse
 from fastapi.routing import APIRoute
 
 from app.api.internal import INTERNAL_TAG
+from app.settings import get_settings
+
+_INTERNAL_SPEC_PREFIX = "internal"
+_INTERNAL_SPEC_URL = f"/{_INTERNAL_SPEC_PREFIX}/openapi.json"
+_SPEC_URL = "/openapi.json"
 
 
 def _remove_422(schema: dict[str, Any]) -> None:
@@ -74,24 +80,29 @@ def setup_openapi(app: FastAPI) -> None:
 
     def internal_openapi() -> dict[str, Any]:
         nonlocal _internal_schema
-        if _internal_schema is None:
+        if _internal_schema is None:  # pragma: no cover
             _internal_schema = _build_internal_schema(app)
         return _internal_schema
 
     app.openapi = custom_openapi  # ty:ignore[invalid-assignment]
 
-    @app.get("/internal/openapi.json", include_in_schema=False)
+    @app.get(_INTERNAL_SPEC_URL, include_in_schema=False)
     async def internal_openapi_schema() -> Response:
         return Response(content=json.dumps(internal_openapi()), media_type="application/json")
 
-    @app.get("/internal/docs", include_in_schema=False)
+    @app.get(f"/{_INTERNAL_SPEC_PREFIX}/docs", include_in_schema=False)
     async def internal_docs() -> HTMLResponse:
         return get_swagger_ui_html(
-            openapi_url="/internal/openapi.json", title=f"{app.title} - Internal Docs"
+            openapi_url=_INTERNAL_SPEC_URL, title=f"{app.title} - Internal Docs"
         )
 
-    @app.get("/internal/redoc", include_in_schema=False)
+    @app.get(f"/{_INTERNAL_SPEC_PREFIX}/redoc", include_in_schema=False)
     async def internal_redoc() -> HTMLResponse:
-        return get_redoc_html(
-            openapi_url="/internal/openapi.json", title=f"{app.title} - Internal Docs"
-        )
+        return get_redoc_html(openapi_url=_INTERNAL_SPEC_URL, title=f"{app.title} - Internal Docs")
+
+
+@lru_cache
+def get_openapi_spec_url() -> str | None:
+    if get_settings().publish_openapi_spec:
+        return _SPEC_URL
+    return None  # pragma: no cover

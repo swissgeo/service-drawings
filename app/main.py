@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import internal
 from app.api.internal import INTERNAL_TAG
-from app.openapi import setup_openapi
+from app.openapi import get_openapi_spec_url, setup_openapi
 from app.otel import initialize_instrumentation, shutdown_otel
 from app.settings import get_settings
 from app.version import __version__
@@ -70,13 +70,15 @@ app = FastAPI(
         "name": "BSD 3-Clause License",
         "identifier": "BSD-3-Clause",
     },
+    openapi_url=get_openapi_spec_url(),
     openapi_tags=[
         {"name": INTERNAL_TAG, "description": "Internal APIs not for external uses"},
     ],
     lifespan=lifespan,
     root_path=settings.root_path,
 )
-setup_openapi(app)
+if settings.publish_openapi_spec:  # pragma: no cover
+    setup_openapi(app)
 
 # Register exceptions handlers
 # TODO

@@ -21,6 +21,9 @@ class Settings(BaseSettings):
 
     root_path: str = ""
 
+    # OpenAPI settings
+    publish_openapi_spec: bool = False
+
     # CORS settings
     cors_origins: list[str] = []
     cors_origin_regex: str | None = None
