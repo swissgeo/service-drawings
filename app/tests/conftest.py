@@ -70,6 +70,7 @@ def settings(moto_server: str) -> Settings:
         aws_region="eu-central-1",
         root_path="",
         otel_sdk_disabled=True,
+        publish_openapi_spec=True,
     )
 
 
