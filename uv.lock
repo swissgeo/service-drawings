@@ -2124,6 +2124,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "aioboto3" },
     { name = "fastapi", extra = ["standard"] },
+    { name = "httptools" },
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-instrumentation-asgi" },
     { name = "opentelemetry-instrumentation-botocore" },
@@ -2133,6 +2134,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyyaml" },
     { name = "types-aiobotocore", extra = ["dynamodb", "s3"] },
+    { name = "uvloop" },
 ]
 
 [package.dev-dependencies]
@@ -2153,6 +2155,7 @@ dev = [
 requires-dist = [
     { name = "aioboto3", specifier = "~=15.5" },
     { name = "fastapi", extras = ["standard"], specifier = "~=0.135" },
+    { name = "httptools", specifier = ">=0.8.0" },
     { name = "opentelemetry-exporter-otlp", specifier = "~=1.41" },
     { name = "opentelemetry-instrumentation-asgi", specifier = "==0.62b1" },
     { name = "opentelemetry-instrumentation-botocore", specifier = "==0.62b1" },
@@ -2162,6 +2165,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = "~=2.13" },
     { name = "pyyaml", specifier = "~=6.0" },
     { name = "types-aiobotocore", extras = ["dynamodb", "s3"], specifier = "~=3.4" },
+    { name = "uvloop", specifier = ">=0.22.1" },
 ]
 
 [package.metadata.requires-dev]

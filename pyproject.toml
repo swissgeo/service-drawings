@@ -12,6 +12,7 @@ dependencies = [
     "fastapi[standard]~=0.135",
     # List of available opentelemetry-instrumentation can be found here
     # https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/instrumentation#readme
+    "httptools>=0.8.0",
     "opentelemetry-exporter-otlp~=1.41",
     "opentelemetry-instrumentation-asgi==0.62b1",     # asgi is used by fastapi
     "opentelemetry-instrumentation-botocore==0.62b1",
@@ -21,6 +22,7 @@ dependencies = [
     "pydantic-settings~=2.13",
     "pyyaml~=6.0",
     "types-aiobotocore[dynamodb,s3]~=3.4",
+    "uvloop>=0.22.1",
 ]
 
 [dependency-groups]
