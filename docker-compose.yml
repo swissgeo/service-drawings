@@ -12,7 +12,7 @@ services:
     networks:
       - network_local
 
-  init-dynamo:
+  init-s3:
     image: amazon/aws-cli
     entrypoint: ["/bin/sh", "-c"]
     volumes:
@@ -20,11 +20,14 @@ services:
     working_dir: /work
     command:
       - |
-        echo "TODO"
+        aws --endpoint-url http://moto-server:5000 s3 mb s3://${AWS_S3_BUCKET_NAME:-service-drawings-local} || true
     environment:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
+    depends_on:
+      moto-server:
+        condition: service_healthy
     networks:
       - network_local
 
