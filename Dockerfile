@@ -78,4 +78,4 @@ EXPOSE 8000
 
 # Here we use uvicorn directly in order to configure its logging configuration file
 # This can be done by using the CMD arg during docker run.
-ENTRYPOINT ["uvicorn", "app.main:app", "--proxy-headers", "--host", "0.0.0.0"]
+ENTRYPOINT ["uvicorn", "app.main:app", "--proxy-headers", "--host", "0.0.0.0", "--loop", "uvloop", "--http", "httptools"]
