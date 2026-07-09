@@ -56,14 +56,7 @@ def test_internal_spec_contains_checker_route(client: TestClient):
     assert "/checker" in spec["paths"]
 
 
-def test_internal_spec_excludes_drawing_routes(client: TestClient):
-    spec = client.get("internal/openapi.json").json()
-
-    # TODO
-    assert spec
-
-
-def test_internal_spec_excludes_state_tag(client: TestClient):
+def test_internal_spec_contains_state_tag(client: TestClient):
     spec = client.get("internal/openapi.json").json()
 
     tag_names = [t["name"] for t in spec["tags"]]

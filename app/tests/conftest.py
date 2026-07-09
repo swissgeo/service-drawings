@@ -1,12 +1,9 @@
-import json
 from collections.abc import Generator
-from typing import Protocol
-from unittest.mock import AsyncMock
+from contextlib import suppress
 
 import boto3
 from moto.server import ThreadedMotoServer
-from mypy_boto3_dynamodb import DynamoDBClient
-from mypy_boto3_dynamodb.service_resource import Table
+from mypy_boto3_s3 import S3Client
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -14,23 +11,6 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.settings import Settings, get_settings
-
-
-class MockPutItemFactory(Protocol):
-    def __call__(
-        self,
-        return_value: dict | None = None,
-        client_error: dict | None = None,
-        mock_client: AsyncMock | None = None,
-    ) -> AsyncMock: ...
-
-
-class MockGetItemFactory(Protocol):
-    def __call__(
-        self,
-        return_value: dict,
-        mock_client: AsyncMock | None = None,
-    ) -> AsyncMock: ...
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +37,7 @@ def moto_server() -> Generator[str]:
 
 @pytest.fixture
 def settings(moto_server: str) -> Settings:
-    """Fixture to provide application settings for testing, overriding the DynamoDB endpoint URL."""
+    """Fixture to provide application settings for testing, overriding the AWS endpoint URL."""
     return Settings(
         # Pydantic will automatically load any .env or .env.default file, so for testing to avoid
         # any different test result between CI and local environment (in which .env file can differ)
@@ -66,8 +46,9 @@ def settings(moto_server: str) -> Settings:
         cors_origins=["http://test.com", "https://hello.com"],
         cors_origin_regex=r"http://localhost:\d+",
         aws_endpoint_url=moto_server,
-        aws_dynamodb_table_name="test-table",
-        aws_region="eu-central-1",
+        aws_s3_bucket_name="test-bucket",
+        aws_s3_endpoint_url=moto_server,
+        aws_cloudfront_domain="test.cloudfront.net",
         root_path="",
         otel_sdk_disabled=True,
         publish_openapi_spec=True,
@@ -75,39 +56,21 @@ def settings(moto_server: str) -> Settings:
 
 
 @pytest.fixture
-def db_client(settings: Settings) -> DynamoDBClient:
-    """Fixture to provide a DynamoDB client configured to connect to the mocked AWS server."""
+def s3_client(settings: Settings) -> S3Client:
+    """Fixture to provide an S3 client configured to connect to the mocked AWS server."""
     return boto3.client(
-        "dynamodb", endpoint_url=settings.aws_endpoint_url, region_name=settings.aws_region
+        "s3", endpoint_url=settings.aws_s3_endpoint_url, region_name="eu-central-1"
     )
-
-
-@pytest.fixture
-def db_table(settings: Settings) -> Table:
-    """
-    Fixture to provide a DynamoDB Table resource connected to the mocked AWS server for testing.
-    """
-    dynamodb = boto3.resource(
-        "dynamodb", endpoint_url=settings.aws_endpoint_url, region_name=settings.aws_region
-    )
-    return dynamodb.Table(settings.aws_dynamodb_table_name)
 
 
 @pytest.fixture(autouse=True)
-def setup_db(settings: Settings, db_client: DynamoDBClient) -> Generator[None]:
-    """Fixture to set up the DynamoDB table before each test and tear it down afterward."""
-    with open("dynamodb-local-config.json", encoding="utf-8") as fd:
-        table_config = fd.read()
-    table_config = table_config.replace(
-        "${AWS_DYNAMODB_TABLE_NAME}", settings.aws_dynamodb_table_name
-    )
-    table_config = json.loads(table_config)
-
-    db_client.create_table(**table_config)
-
-    yield
-
-    db_client.delete_table(TableName=settings.aws_dynamodb_table_name)
+def setup_s3(settings: Settings, s3_client: S3Client) -> None:
+    """Fixture to set up the S3 bucket before each test."""
+    with suppress(s3_client.exceptions.BucketAlreadyOwnedByYou):
+        s3_client.create_bucket(
+            Bucket=settings.aws_s3_bucket_name,
+            CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
+        )
 
 
 @pytest.fixture(autouse=True)

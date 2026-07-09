@@ -67,7 +67,7 @@ setup: .env start-moto start-otel ## Create virtualenv with all packages for dev
 	uv sync
 	$(PRE_COMMIT) install
 	# Start a new shell with the virtualenv activated and the .env file loaded into the environment
-	# variables. The latter is required for django which reads the settings from the environment variables
+	# variables. The latter is required for FastAPI which reads the settings from the environment variables
 	uv run $$SHELL
 
 

@@ -33,8 +33,9 @@ class Settings(BaseSettings):
 
     # AWS Settings
     aws_endpoint_url: str | None = None
-    aws_dynamodb_table_name: str
-    aws_region: str
+    aws_s3_bucket_name: str
+    aws_s3_endpoint_url: str | None = None
+    aws_cloudfront_domain: str
 
     # OTEL configuration
     otel_sdk_disabled: bool = False

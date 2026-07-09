@@ -30,13 +30,10 @@ def get_logging_cfg(config_file: Path) -> dict:  # pragma: no cover
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator:
+async def lifespan(_app: FastAPI) -> AsyncGenerator:
     # Startup code (runs before application startup)
 
     # settings = get_settings()
-
-    logger.info("Initializing DynamoDB session")
-    app.state.dynamodb_session = "TODO"
 
     logger.info("Startup tasks completed")
 

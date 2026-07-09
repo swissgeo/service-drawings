@@ -257,9 +257,6 @@ wheels = [
 ]
 
 [package.optional-dependencies]
-dynamodb = [
-    { name = "mypy-boto3-dynamodb" },
-]
 s3 = [
     { name = "mypy-boto3-s3" },
 ]
@@ -1103,10 +1100,6 @@ wheels = [
 ]
 
 [package.optional-dependencies]
-dynamodb = [
-    { name = "docker" },
-    { name = "py-partiql-parser" },
-]
 s3 = [
     { name = "py-partiql-parser" },
     { name = "pyyaml" },
@@ -1180,15 +1173,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/0c/f7/addf1087b860ac60e6f382240f64fb99f8bfb532bb06f7c542b83c29ca61/multidict-6.7.1-cp314-cp314t-win_amd64.whl", hash = "sha256:497bde6223c212ba11d462853cfa4f0ae6ef97465033e7dc9940cdb3ab5b48e5", size = 53542, upload-time = "2026-01-26T02:46:08.809Z" },
     { url = "https://files.pythonhosted.org/packages/4c/81/4629d0aa32302ef7b2ec65c75a728cc5ff4fa410c50096174c1632e70b3e/multidict-6.7.1-cp314-cp314t-win_arm64.whl", hash = "sha256:2bbd113e0d4af5db41d5ebfe9ccaff89de2120578164f86a5d17d5a576d1e5b2", size = 44719, upload-time = "2026-01-26T02:46:11.146Z" },
     { url = "https://files.pythonhosted.org/packages/81/08/7036c080d7117f28a4af526d794aab6a84463126db031b007717c1a6676e/multidict-6.7.1-py3-none-any.whl", hash = "sha256:55d97cc6dae627efa6a6e548885712d4864b81110ac76fa4e534c03819fa4a56", size = 12319, upload-time = "2026-01-26T02:46:44.004Z" },
-]
-
-[[package]]
-name = "mypy-boto3-dynamodb"
-version = "1.43.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/38/41/2823aad9f3abab6104cd8aaafebabfba19927227fbc277e2289c3b915c1d/mypy_boto3_dynamodb-1.43.0.tar.gz", hash = "sha256:f0cea38e058f1d07361ecb55d8f40665d824b42cf4864724c7fccc8bf3946fcd", size = 48755, upload-time = "2026-04-29T22:59:59.119Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/be/e2/1f63f04600fc21cb848c10ce16490252e27d812bfd5a716659283049d3a3/mypy_boto3_dynamodb-1.43.0-py3-none-any.whl", hash = "sha256:60b64d15e86d406a980d96f734d8c7fb1704668d0234dc8dabd2532c902a3ba6", size = 58873, upload-time = "2026-04-29T22:59:56.823Z" },
 ]
 
 [[package]]
@@ -2133,15 +2117,15 @@ dependencies = [
     { name = "orjson" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
-    { name = "types-aiobotocore", extra = ["dynamodb", "s3"] },
+    { name = "types-aiobotocore", extra = ["s3"] },
     { name = "uvloop" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "boto3-stubs", extra = ["dynamodb", "s3"] },
+    { name = "boto3-stubs", extra = ["s3"] },
     { name = "httpx" },
-    { name = "moto", extra = ["dynamodb", "s3", "server"] },
+    { name = "moto", extra = ["s3", "server"] },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -2164,15 +2148,15 @@ requires-dist = [
     { name = "orjson", specifier = "~=3.11" },
     { name = "pydantic-settings", specifier = "~=2.13" },
     { name = "pyyaml", specifier = "~=6.0" },
-    { name = "types-aiobotocore", extras = ["dynamodb", "s3"], specifier = "~=3.4" },
+    { name = "types-aiobotocore", extras = ["s3"], specifier = "~=3.4" },
     { name = "uvloop", specifier = "~=0.22.1" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "boto3-stubs", extras = ["dynamodb", "s3"], specifier = "~=1.42" },
+    { name = "boto3-stubs", extras = ["s3"], specifier = "~=1.42" },
     { name = "httpx", specifier = "~=0.28" },
-    { name = "moto", extras = ["dynamodb", "s3", "server"], specifier = "~=5.1" },
+    { name = "moto", extras = ["s3", "server"], specifier = "~=5.1" },
     { name = "pre-commit", specifier = "~=4.5" },
     { name = "pytest", specifier = "~=9.0" },
     { name = "pytest-asyncio", specifier = "~=1.3" },
@@ -2286,20 +2270,8 @@ wheels = [
 ]
 
 [package.optional-dependencies]
-dynamodb = [
-    { name = "types-aiobotocore-dynamodb" },
-]
 s3 = [
     { name = "types-aiobotocore-s3" },
-]
-
-[[package]]
-name = "types-aiobotocore-dynamodb"
-version = "3.7.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/74/3c/05a94ed5d7a0a626824bd84be7646522529601513e288f07c2ea15acaffe/types_aiobotocore_dynamodb-3.7.0.tar.gz", hash = "sha256:bb23c9923734ed8d461da0b8a1166a0b8d9080e63c2e65e32cd03de57080555d", size = 49044, upload-time = "2026-05-10T03:12:54.764Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/7f/c8/491c357e0d52d2fdf5842c6ffc9cf698d4e127fa11e33ff3c7b389ef86a5/types_aiobotocore_dynamodb-3.7.0-py3-none-any.whl", hash = "sha256:4624542dd2863d0872b2b51b5823272988eac084918e4fc17db899c2910d133c", size = 59873, upload-time = "2026-05-10T03:12:51.494Z" },
 ]
 
 [[package]]
