@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     aws_s3_bucket_name: str
     aws_s3_endpoint_url: str | None = None
     aws_cloudfront_domain: str
+    max_kmz_size_bytes: int = 5_242_880  # 5 MB default
 
     # OTEL configuration
     otel_sdk_disabled: bool = False
