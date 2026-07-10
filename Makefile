@@ -40,6 +40,7 @@ export UV_ENV_FILE := $(ENV_FILE)
 -include $(ENV_FILE)
 
 CONTAINER_LOGGING_CONFIG := /app/logging-config.yaml
+LOGGING_CONFIG_FILE ?= logging-otel-config.yaml
 
 .env:
 	cp .env.default .env
@@ -58,7 +59,7 @@ git-info: ## Print the current version information
 
 .PHONY: ci
 ci: .env
-	# Create virtual env with all packages for development using the Pipfile.lock
+	# Create virtual env with all packages for development using the lockfile
 	uv sync --frozen
 
 
@@ -69,6 +70,11 @@ setup: .env start-moto start-otel ## Create virtualenv with all packages for dev
 	# Start a new shell with the virtualenv activated and the .env file loaded into the environment
 	# variables. The latter is required for FastAPI which reads the settings from the environment variables
 	uv run $$SHELL
+
+
+.PHONY: sync
+sync: ## Sync dependencies with lockfile
+	uv sync --frozen
 
 
 .PHONY: format
@@ -128,6 +134,11 @@ dockerrun: dockerbuild ## Run the locally built docker image
 lint: ## Run the linter and type checker on the code base
 	$(RUFF) check
 	$(TY) check
+
+
+.PHONY: check
+check: lint test ## Run lint + typecheck + tests (full CI gate locally)
+	@echo "All checks passed"
 
 
 .PHONY: test-ci
