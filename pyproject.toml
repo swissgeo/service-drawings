@@ -109,9 +109,17 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 "app/tests/**" = [
     "S101",    # Ignore usage of assert statements in tests
+    "ANN001",  # Ignore missing type annotations for function arguments in tests
     "ANN201",  # Ignore missing return type hints in tests
     "PLR2004", # Ignore magic number in tests
     "PLR0913", # Ignore too many arguments in function in tests
+]
+
+"scripts/**" = [
+    "T201",     # print is expected in scripts
+    "S101",     # assert is fine in smoke-test scripts
+    "ASYNC230", # blocking open() is fine in scripts
+    "INP001",   # scripts don't need __init__.py
 ]
 
 #------------------------------------------------------------------------------
@@ -148,7 +156,7 @@ addopts = []
 #==============================================================================
 # Coverage configuration
 [tool.coverage.run]
-omit = ["*/tests/*", "version.py", "otel.py"]
+omit = ["*/tests/*", "scripts/*", "version.py", "otel.py"]
 
 [tool.coverage.report]
 exclude_lines = ["if TYPE_CHECKING:", "pragma: no cover"]
