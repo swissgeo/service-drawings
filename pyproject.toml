@@ -75,7 +75,13 @@ ignore = [
     "ANN401", # Ignore Any typehint
     "ANN002", # Ignore typehint for *args
     "ANN003", # Ignore typehint for **kwargs
-    "D",      # Ignore pydocstyle
+    "CPY",    # Ignore copyright
+    "D100",   # Ignore missing docstring in module
+    "D104",   # Ignore missing docstring in public package (empty __init__.py)
+    "D107",   # Ignore missing docstring in __init__
+    "D203",   # Ignore docstring conflicting rule
+    "D213",   # Ignore docstring conflicting rule
+    "D401",   # Ignore imperative mood
     "EM",     # Ignore flake8-errmsg
     "FBT001", # Ignore boolean-type-hint-positional-argument
     "FBT002", # Ignore boolean-default-value-positional-argument
@@ -111,6 +117,12 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
     "S101",    # Ignore usage of assert statements in tests
     "ANN001",  # Ignore missing type annotations for function arguments in tests
     "ANN201",  # Ignore missing return type hints in tests
+    "D101",    # Ignore missing docstring in public class (tests)
+    "D102",    # Ignore missing docstring in public method (tests)
+    "D103",    # Ignore missing docstring in public function (tests)
+    "D104",    # Ignore missing docstring in public package (tests)
+    "D105",    # Ignore missing docstring in magic method (tests)
+    "INP001",  # Ignore implicit namespace packages in tests
     "PLR2004", # Ignore magic number in tests
     "PLR0913", # Ignore too many arguments in function in tests
 ]
@@ -119,6 +131,7 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
     "T201",     # print is expected in scripts
     "S101",     # assert is fine in smoke-test scripts
     "ASYNC230", # blocking open() is fine in scripts
+    "D",        # Ignore pydocstyle (scripts)
     "INP001",   # scripts don't need __init__.py
 ]
 

@@ -100,8 +100,9 @@ def app() -> FastAPI:
 
 @pytest.fixture
 def client(app: FastAPI, settings: Settings) -> Generator[TestClient]:
-    """Fixture to provide a TestClient for the FastAPI application with settings dependency
-    injection mocked.
+    """Fixture to provide a TestClient for the FastAPI application.
+
+    Settings dependency injection is mocked via dependency_overrides.
     """
 
     def get_settings_override() -> Settings:

@@ -1,3 +1,11 @@
+"""OpenTelemetry instrumentation setup for logs, traces, and metrics.
+
+Initializes OTEL providers and exporters at import time to support uvicorn's
+logging.dictConfig handler resolution. Provides functions to instrument
+third-party libraries (aioboto3, FastAPI) and to cleanly shut down all
+providers on application shutdown.
+"""
+
 import logging
 
 from opentelemetry import metrics, trace
@@ -137,7 +145,7 @@ meter_provider = _setup_metrics(metric_exporter)
 
 
 def get_otel_handler() -> logging.Handler:
-    """Get the OTEL logging Handler"""
+    """Get the OTEL logging Handler."""
     settings = get_settings()
 
     if settings.otel_sdk_disabled:
@@ -151,9 +159,9 @@ def get_otel_handler() -> logging.Handler:
 
 
 def initialize_instrumentation(app: FastAPI) -> None:
-    """Initialize OTEL instrumentation
+    """Initialize OTEL instrumentation.
 
-    Setup OTEL tracing functionalities for third party libraries
+    Setup OTEL tracing functionalities for third party libraries.
     """
     settings = get_settings()
 
@@ -169,7 +177,6 @@ def initialize_instrumentation(app: FastAPI) -> None:
 
 def shutdown_otel() -> None:
     """Flush and shutdown OTEL providers/processors on application shutdown."""
-
     if trace_provider is not None:
         trace_provider.shutdown()
 

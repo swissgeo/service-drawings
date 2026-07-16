@@ -1,3 +1,11 @@
+"""Split public and internal OpenAPI specification generation.
+
+Produces two separate OpenAPI schemas: a public one excluding Internal-tagged
+routes and an internal one containing only those routes. Registers dedicated
+Swagger UI and ReDoc endpoints for the internal spec. Strips 422 responses
+replaced by app-level 400 exception handlers.
+"""
+
 import json
 from functools import lru_cache
 from typing import Any
@@ -103,6 +111,7 @@ def setup_openapi(app: FastAPI) -> None:
 
 @lru_cache
 def get_openapi_spec_url() -> str | None:
+    """Return the OpenAPI spec URL if publishing is enabled, otherwise None."""
     if get_settings().publish_openapi_spec:
         return _SPEC_URL
     return None  # pragma: no cover

@@ -38,6 +38,7 @@ services:
       - ./otel-local-config.yaml:/otel-local-config.yaml
     ports:
       - "4317:4317"
+      - "8889:8889"
     depends_on:
       - jaeger
     networks:
@@ -49,6 +50,15 @@ services:
       - "16686:16686" # Jaeger UI
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - network_local
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
     networks:
       - network_local
 

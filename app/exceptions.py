@@ -1,3 +1,10 @@
+"""Custom exception hierarchy for service-drawings.
+
+Defines a base ServiceDrawingsError and four subclasses for specific failure
+modes: invalid KMZ content, oversized files, missing drawings, and S3 errors.
+"""
+
+
 class ServiceDrawingsError(Exception):
     """Base exception for all service-drawings errors."""
 
@@ -7,6 +14,7 @@ class ServiceDrawingsError(Exception):
         super().__init__(self.message)
 
     def __str__(self) -> str:
+        """Return the exception message."""
         return self.message
 
 

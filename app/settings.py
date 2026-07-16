@@ -1,3 +1,10 @@
+"""Application configuration via pydantic-settings.
+
+Defines the Settings model loaded from environment variables and .env files.
+Covers AWS S3, CloudFront, CORS, OpenTelemetry, and logging configuration.
+Provides a cached singleton get_settings() dependency for FastAPI injection.
+"""
+
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -9,6 +16,11 @@ from pydantic import field_validator
 
 
 class Settings(BaseSettings):
+    """Application settings loaded from environment variables and .env files.
+
+    Covers AWS, CORS, OpenTelemetry, and logging configuration.
+    """
+
     model_config = SettingsConfigDict(
         env_file=(".env", ".env.default"),
         env_file_encoding="utf-8",
@@ -75,6 +87,7 @@ class Settings(BaseSettings):
     )
     @classmethod
     def parse_list(cls, v: str | list[str]) -> list[str]:
+        """Parse a comma-separated string or list into a list of strings."""
         if isinstance(v, list):
             return v
         return v.split(",")
@@ -86,6 +99,7 @@ class Settings(BaseSettings):
 # working cleanly with FastAPI dependency injection.
 @lru_cache
 def get_settings() -> Settings:  # pragma: no cover
+    """Return the cached singleton Settings instance."""
     return Settings()  # ty: ignore[missing-argument] for production we don't pass parameter we use environment variable
 
 

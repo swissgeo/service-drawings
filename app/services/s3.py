@@ -1,9 +1,14 @@
+"""Async S3 client wrapper for KMZ drawing storage."""
+
+import logging
 from collections.abc import AsyncIterator
 
 import aioboto3
 import botocore.exceptions
 
 from app.exceptions import DrawingNotFoundError, S3Error
+
+logger = logging.getLogger(__name__)
 
 _HTTP_NOT_FOUND = 404
 
@@ -27,6 +32,7 @@ class S3Service:
 
         Raises:
             S3Error: If the S3 upload fails
+
         """
         try:
             async with self._session.client(  # type: ignore  # noqa: PGH003
@@ -39,7 +45,8 @@ class S3Service:
                     ContentType=content_type,
                     Metadata={"sha256": sha256},
                 )
-        except Exception as e:
+        except botocore.exceptions.BotoCoreError as e:
+            logger.exception("S3 upload failed for key %s", key)
             raise S3Error(f"S3 upload failed for key {key}: {e}") from e
 
     async def get_kml(self, key: str) -> AsyncIterator[bytes]:
@@ -54,6 +61,7 @@ class S3Service:
         Raises:
             DrawingNotFoundError: If the object does not exist
             S3Error: If the S3 read fails
+
         """
         try:
             async with self._session.client(  # type: ignore  # noqa: PGH003
@@ -69,8 +77,10 @@ class S3Service:
             status_code = e.response["ResponseMetadata"]["HTTPStatusCode"]
             if error_code == "NoSuchKey" or status_code == _HTTP_NOT_FOUND:
                 raise DrawingNotFoundError(f"Drawing not found: {key}") from e
+            logger.exception("S3 read failed for key %s", key)
             raise S3Error(f"S3 read failed for key {key}: {e}") from e
-        except Exception as e:
+        except botocore.exceptions.BotoCoreError as e:
+            logger.exception("S3 read failed for key %s", key)
             raise S3Error(f"S3 read failed for key {key}: {e}") from e
 
     async def head_kml(self, key: str) -> dict[str, str]:
@@ -85,6 +95,7 @@ class S3Service:
         Raises:
             DrawingNotFoundError: If the object does not exist
             S3Error: If the S3 head request fails
+
         """
         try:
             async with self._session.client(  # type: ignore  # noqa: PGH003
@@ -99,6 +110,8 @@ class S3Service:
             status_code = e.response["ResponseMetadata"]["HTTPStatusCode"]
             if error_code == "NoSuchKey" or status_code == _HTTP_NOT_FOUND:
                 raise DrawingNotFoundError(f"Drawing not found: {key}") from e
+            logger.exception("S3 head failed for key %s", key)
             raise S3Error(f"S3 head failed for key {key}: {e}") from e
-        except Exception as e:
+        except botocore.exceptions.BotoCoreError as e:
+            logger.exception("S3 head failed for key %s", key)
             raise S3Error(f"S3 head failed for key {key}: {e}") from e

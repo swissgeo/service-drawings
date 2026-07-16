@@ -1,3 +1,10 @@
+"""FastAPI application entry point for the service-drawings API.
+
+Configures CORS middleware, OpenTelemetry instrumentation, logging, and
+registers all application routers. The application lifespan handles startup
+and shutdown tasks such as OTEL provider cleanup.
+"""
+
 import logging
 import logging.config
 from collections.abc import AsyncGenerator
@@ -22,7 +29,7 @@ settings = get_settings()
 
 
 def get_logging_cfg(config_file: Path) -> dict:  # pragma: no cover
-    """Load and parse logging configuration from the given file"""
+    """Load and parse logging configuration from the given file."""
     config = yaml.safe_load(config_file.read_text())
 
     logger.info("Loaded logging configuration from file %s", config_file)
@@ -31,6 +38,10 @@ def get_logging_cfg(config_file: Path) -> dict:  # pragma: no cover
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator:
+    """Handle application startup and shutdown events.
+
+    Initializes OTEL instrumentation on startup and flushes providers on shutdown.
+    """
     # Startup code (runs before application startup)
 
     # settings = get_settings()

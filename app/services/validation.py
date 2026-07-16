@@ -1,3 +1,9 @@
+"""KMZ file validation utilities.
+
+Provides validate_kmz() to check uploaded files against size limits and
+ZIP magic bytes to ensure they are valid KMZ archives before storage.
+"""
+
 from app.exceptions import InvalidKMZError, KMZTooLargeError
 
 MAX_KMZ_SIZE = 5 * 1024 * 1024  # 5 MB default
@@ -14,6 +20,7 @@ def validate_kmz(content: bytes, max_size: int = MAX_KMZ_SIZE) -> None:
     Raises:
         KMZTooLargeError: If content exceeds max_size
         InvalidKMZError: If content does not start with ZIP magic bytes
+
     """
     if len(content) > max_size:
         raise KMZTooLargeError(
