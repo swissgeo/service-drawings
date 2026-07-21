@@ -2,11 +2,18 @@
 
 import logging
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Annotated
 
 import aioboto3
 import botocore.exceptions
 
+from fastapi import Depends
+
 from app.exceptions import DrawingNotFoundError, S3Error
+from app.settings import get_settings
+
+if TYPE_CHECKING:
+    from app.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +74,7 @@ class S3Service:
             async with self._session.client(  # type: ignore  # noqa: PGH003
                 "s3", endpoint_url=self._endpoint_url
             ) as client:
-                response = await client.get_object(
-                    Bucket=self._bucket, Key=key
-                )
+                response = await client.get_object(Bucket=self._bucket, Key=key)
                 async for chunk in response["Body"]:
                     yield chunk
         except botocore.exceptions.ClientError as e:
@@ -101,9 +106,7 @@ class S3Service:
             async with self._session.client(  # type: ignore  # noqa: PGH003
                 "s3", endpoint_url=self._endpoint_url
             ) as client:
-                response = await client.head_object(
-                    Bucket=self._bucket, Key=key
-                )
+                response = await client.head_object(Bucket=self._bucket, Key=key)
                 return response.get("Metadata", {})
         except botocore.exceptions.ClientError as e:
             error_code = e.response["Error"]["Code"]
@@ -115,3 +118,48 @@ class S3Service:
         except botocore.exceptions.BotoCoreError as e:
             logger.exception("S3 head failed for key %s", key)
             raise S3Error(f"S3 head failed for key {key}: {e}") from e
+
+    async def check_bucket(self) -> bool:
+        """Check whether the configured S3 bucket is accessible.
+
+        Performs a head_bucket request to verify S3 connectivity.
+        Used by the Kubernetes readiness probe.
+
+        Returns:
+            True if the bucket is reachable, False otherwise.
+
+        """
+        try:
+            async with self._session.client(  # type: ignore  # noqa: PGH003
+                "s3", endpoint_url=self._endpoint_url
+            ) as client:
+                await client.head_bucket(Bucket=self._bucket)
+        except (botocore.exceptions.BotoCoreError, botocore.exceptions.ClientError):
+            logger.exception("S3 bucket connectivity check failed for bucket %s", self._bucket)
+            return False
+        else:
+            return True
+
+
+def get_s3_service(
+    settings: "Settings" = Depends(get_settings),  # noqa: B008, UP037
+) -> "S3Service":  # noqa: UP037
+    """FastAPI dependency that provides a configured S3Service instance.
+
+    Args:
+        settings: Application settings injected via FastAPI dependency.
+
+    Returns:
+        A new S3Service configured with the application's bucket and endpoint.
+
+    """
+    return S3Service(
+        bucket=settings.aws_s3_bucket_name,
+        endpoint_url=settings.aws_s3_endpoint_url,
+    )
+
+
+S3ServiceDep = Annotated[
+    S3Service,
+    Depends(get_s3_service),
+]

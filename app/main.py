@@ -13,11 +13,18 @@ from pathlib import Path
 
 import yaml
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from app.api import internal
+from app.api import internal, wps
 from app.api.internal import INTERNAL_TAG
+from app.exceptions import (
+    DrawingNotFoundError,
+    InvalidKMZError,
+    KMZTooLargeError,
+    S3Error,
+)
 from app.openapi import get_openapi_spec_url, setup_openapi
 from app.otel import initialize_instrumentation, shutdown_otel
 from app.settings import get_settings
@@ -88,8 +95,31 @@ app = FastAPI(
 if settings.publish_openapi_spec:  # pragma: no cover
     setup_openapi(app)
 
-# Register exceptions handlers
-# TODO
+
+# Register exception handlers
+@app.exception_handler(InvalidKMZError)
+async def invalid_kmz_handler(_request: Request, exc: InvalidKMZError) -> JSONResponse:
+    """Handle invalid KMZ errors with a 400 Bad Request response."""
+    return JSONResponse(status_code=400, content={"detail": exc.message})
+
+
+@app.exception_handler(KMZTooLargeError)
+async def kmz_too_large_handler(_request: Request, exc: KMZTooLargeError) -> JSONResponse:
+    """Handle oversized KMZ errors with a 413 Payload Too Large response."""
+    return JSONResponse(status_code=413, content={"detail": exc.message})
+
+
+@app.exception_handler(DrawingNotFoundError)
+async def drawing_not_found_handler(_request: Request, exc: DrawingNotFoundError) -> JSONResponse:
+    """Handle missing drawing errors with a 404 Not Found response."""
+    return JSONResponse(status_code=404, content={"detail": exc.message})
+
+
+@app.exception_handler(S3Error)
+async def s3_error_handler(_request: Request, exc: S3Error) -> JSONResponse:
+    """Handle S3 operation errors with a 500 Internal Server Error response."""
+    return JSONResponse(status_code=500, content={"detail": exc.message})
+
 
 # Add middlewares
 app.add_middleware(
@@ -104,6 +134,7 @@ app.add_middleware(
 
 # Register routes
 app.include_router(internal.router)
+app.include_router(wps.router)
 
 
 # Setup OTEL instrumentation
