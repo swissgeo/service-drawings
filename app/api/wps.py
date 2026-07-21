@@ -8,7 +8,6 @@ with /api/wps/v1 per SWISSGEO API standards.
 import hashlib
 import logging
 import uuid
-from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, UploadFile
@@ -119,7 +118,7 @@ async def create_drawing(
 
 @router.get("/drawings/{drawing_id}")
 async def get_drawing(
-    drawing_id: str,
+    drawing_id: uuid.UUID,
     s3: S3ServiceDep,
 ) -> StreamingResponse:
     """Retrieve a KMZ drawing file by its identifier.
@@ -128,7 +127,7 @@ async def get_drawing(
     Content-Type and Content-Disposition headers for browser download.
 
     Args:
-        drawing_id: The UUID string of the drawing to retrieve.
+        drawing_id: The UUID of the drawing to retrieve.
         s3: S3 service dependency for object storage operations.
 
     Returns:
@@ -139,18 +138,14 @@ async def get_drawing(
         S3Error: If the S3 read operation fails.
 
     """
-    s3_key = _build_s3_key(uuid.UUID(drawing_id))
+    s3_key = _build_s3_key(drawing_id)
 
     # Verify the drawing exists before streaming, so that DrawingNotFoundError
     # is raised before the response starts and can be caught by the exception handler.
     await s3.head_kml(s3_key)
 
-    async def stream_kml() -> AsyncIterator[bytes]:
-        async for chunk in s3.get_kml(s3_key):
-            yield chunk
-
     return StreamingResponse(
-        stream_kml(),
+        s3.get_kml(s3_key),
         media_type=KMZ_CONTENT_TYPE,
         headers={
             "Content-Disposition": f'attachment; filename="{drawing_id}.kmz"',
@@ -159,14 +154,14 @@ async def get_drawing(
 
 
 @router.put("/drawings/{drawing_id}")
-async def update_drawing(drawing_id: str) -> JSONResponse:  # noqa: ARG001
+async def update_drawing(drawing_id: uuid.UUID) -> JSONResponse:  # noqa: ARG001
     """Update an existing KMZ drawing (reserved for future implementation).
 
     This endpoint is not implemented in T1. It will support overwriting
     an existing KMZ file at the same S3 key in a future release.
 
     Args:
-        drawing_id: The UUID string of the drawing to update.
+        drawing_id: The UUID of the drawing to update.
 
     Returns:
         501 Not Implemented with an explanatory message.

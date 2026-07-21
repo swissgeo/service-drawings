@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 
 _HTTP_NOT_FOUND = 404
 
+_session: aioboto3.Session | None = None
+
+
+def _get_session() -> aioboto3.Session:
+    """Return the module-level aioboto3 session singleton."""
+    global _session  # noqa: PLW0603
+    if _session is None:
+        _session = aioboto3.Session()
+    return _session
+
 
 class S3Service:
     """Async S3 client wrapper for KMZ drawing storage."""
@@ -26,7 +36,6 @@ class S3Service:
     def __init__(self, bucket: str, endpoint_url: str | None = None) -> None:
         self._bucket = bucket
         self._endpoint_url = endpoint_url
-        self._session = aioboto3.Session()
 
     async def upload_kml(self, key: str, data: bytes, content_type: str, sha256: str) -> None:
         """Upload a KMZ file to S3 with SHA-256 metadata.
@@ -42,7 +51,7 @@ class S3Service:
 
         """
         try:
-            async with self._session.client(  # type: ignore  # noqa: PGH003
+            async with _get_session().client(  # type: ignore  # noqa: PGH003
                 "s3", endpoint_url=self._endpoint_url
             ) as client:
                 await client.put_object(
@@ -71,7 +80,7 @@ class S3Service:
 
         """
         try:
-            async with self._session.client(  # type: ignore  # noqa: PGH003
+            async with _get_session().client(  # type: ignore  # noqa: PGH003
                 "s3", endpoint_url=self._endpoint_url
             ) as client:
                 response = await client.get_object(Bucket=self._bucket, Key=key)
@@ -103,7 +112,7 @@ class S3Service:
 
         """
         try:
-            async with self._session.client(  # type: ignore  # noqa: PGH003
+            async with _get_session().client(  # type: ignore  # noqa: PGH003
                 "s3", endpoint_url=self._endpoint_url
             ) as client:
                 response = await client.head_object(Bucket=self._bucket, Key=key)
@@ -130,7 +139,7 @@ class S3Service:
 
         """
         try:
-            async with self._session.client(  # type: ignore  # noqa: PGH003
+            async with _get_session().client(  # type: ignore  # noqa: PGH003
                 "s3", endpoint_url=self._endpoint_url
             ) as client:
                 await client.head_bucket(Bucket=self._bucket)

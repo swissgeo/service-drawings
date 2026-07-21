@@ -5,8 +5,7 @@ probes. All routes in this router are tagged as Internal and excluded from
 the public OpenAPI specification.
 """
 
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException
 
 from app.schemas.checker import Checker
 from app.services.s3 import S3ServiceDep
@@ -26,7 +25,7 @@ async def get_checker() -> Checker:
 @router.get("/checker/ready", summary="Kubernetes Readiness Probe")
 async def get_checker_ready(
     s3: S3ServiceDep,
-) -> JSONResponse:
+) -> Checker:
     """Readiness probe that verifies S3 connectivity.
 
     Performs a head_bucket request against the configured S3 bucket
@@ -39,15 +38,14 @@ async def get_checker_ready(
 
     Returns:
         Checker with success=True if S3 is reachable.
-        Returns 503 with success=False if S3 is unreachable.
+
+    Raises:
+        HTTPException: 503 if S3 is unreachable.
 
     """
     if await s3.check_bucket():
-        return JSONResponse(
-            status_code=200,
-            content=Checker(success=True, message="OK", version=__version__).model_dump(),
-        )
-    return JSONResponse(
+        return Checker(success=True, message="OK", version=__version__)
+    raise HTTPException(
         status_code=503,
-        content=Checker(success=False, message="S3 unavailable", version=__version__).model_dump(),
+        detail="S3 unavailable",
     )
