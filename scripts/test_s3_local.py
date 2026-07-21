@@ -4,6 +4,7 @@ Usage:
     make start-moto          # ensure moto is running
     uv run python3 scripts/test_s3_local.py
 """
+
 import asyncio
 import hashlib
 import os

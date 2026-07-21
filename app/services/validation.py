@@ -23,8 +23,6 @@ def validate_kmz(content: bytes, max_size: int = MAX_KMZ_SIZE) -> None:
 
     """
     if len(content) > max_size:
-        raise KMZTooLargeError(
-            f"File size {len(content)} bytes exceeds maximum {max_size} bytes"
-        )
+        raise KMZTooLargeError(f"File size {len(content)} bytes exceeds maximum {max_size} bytes")
     if not content.startswith(ZIP_MAGIC):
         raise InvalidKMZError("File is not a valid ZIP archive")

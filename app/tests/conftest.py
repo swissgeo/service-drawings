@@ -58,9 +58,7 @@ def settings(moto_server: str) -> Settings:
 @pytest.fixture
 def s3_client(settings: Settings) -> S3Client:
     """Fixture to provide an S3 client configured to connect to the mocked AWS server."""
-    return boto3.client(
-        "s3", endpoint_url=settings.aws_s3_endpoint_url, region_name="eu-central-1"
-    )
+    return boto3.client("s3", endpoint_url=settings.aws_s3_endpoint_url, region_name="eu-central-1")
 
 
 @pytest.fixture(autouse=True)
