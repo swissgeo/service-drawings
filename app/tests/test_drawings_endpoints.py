@@ -6,10 +6,14 @@ updating KMZ drawing files via the FastAPI TestClient with a mocked S3 backend.
 
 import io
 import zipfile
+from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
 import pytest
+
+from app.exceptions import S3Error
+from app.services.s3 import S3Service, get_s3_service
 
 
 @pytest.fixture
@@ -110,3 +114,33 @@ def test_update_drawing_not_implemented(client: TestClient, valid_kmz_bytes: byt
     response = client.put(f"/api/wps/v1/drawings/{drawing_id}")
     assert response.status_code == 501
     assert response.json() == {"detail": "Not implemented"}
+
+
+def test_get_drawing_invalid_uuid(client: TestClient):
+    """GET with a malformed UUID returns 422 Unprocessable Entity."""
+    response = client.get("/api/wps/v1/drawings/not-a-valid-uuid")
+    assert response.status_code == 422
+
+
+def test_create_drawing_s3_failure(client: TestClient, valid_kmz_bytes: bytes, settings):
+    """POST when S3 upload fails returns 500 with sanitized message."""
+    broken_s3 = S3Service(
+        bucket=settings.aws_s3_bucket_name,
+        endpoint_url=settings.aws_s3_endpoint_url,
+    )
+    broken_s3.upload_kml = AsyncMock(side_effect=S3Error("AWS error details here"))  # type: ignore  # noqa: PGH003
+
+    client.app.dependency_overrides[get_s3_service] = lambda: broken_s3  # type: ignore  # noqa: PGH003
+
+    try:
+        response = client.post(
+            "/api/wps/v1/drawings",
+            files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        )
+        assert response.status_code == 500
+        data = response.json()
+        assert "detail" in data
+        # The message should be sanitized, NOT contain AWS details
+        assert "AWS error details" not in data["detail"]
+    finally:
+        del client.app.dependency_overrides[get_s3_service]  # type: ignore  # noqa: PGH003

@@ -81,3 +81,14 @@ async def test_head_kml_not_found(settings) -> None:
 
     with pytest.raises(DrawingNotFoundError):
         await svc.head_kml(key)
+
+
+@pytest.mark.asyncio
+async def test_check_bucket_success(settings) -> None:
+    """check_bucket returns True when the S3 bucket is reachable."""
+    svc = S3Service(
+        bucket=settings.aws_s3_bucket_name,
+        endpoint_url=settings.aws_s3_endpoint_url,
+    )
+    result = await svc.check_bucket()
+    assert result is True
