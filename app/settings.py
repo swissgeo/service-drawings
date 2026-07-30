@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     aws_s3_endpoint_url: str | None = None
     aws_cloudfront_domain: str
     max_kmz_size_bytes: int = 5_242_880  # 5 MB default
+    max_body_size_bytes: int = 10_485_760  # 10 MB default (KMZ max + multipart overhead)
 
     # OTEL configuration
     otel_sdk_disabled: bool = False

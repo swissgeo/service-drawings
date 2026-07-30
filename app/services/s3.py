@@ -143,7 +143,7 @@ class S3Service:
                 "s3", endpoint_url=self._endpoint_url
             ) as client:
                 await client.head_bucket(Bucket=self._bucket)
-        except (botocore.exceptions.BotoCoreError, botocore.exceptions.ClientError):
+        except botocore.exceptions.BotoCoreError, botocore.exceptions.ClientError:
             logger.exception("S3 bucket connectivity check failed for bucket %s", self._bucket)
             return False
         else:

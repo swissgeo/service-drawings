@@ -25,6 +25,7 @@ from app.exceptions import (
     KMZTooLargeError,
     S3Error,
 )
+from app.middlewares.body_size import MaxBodySizeMiddleware
 from app.openapi import get_openapi_spec_url, setup_openapi
 from app.otel import initialize_instrumentation, shutdown_otel
 from app.settings import get_settings
@@ -123,6 +124,8 @@ async def s3_error_handler(_request: Request, exc: S3Error) -> JSONResponse:
 
 
 # Add middlewares
+app.add_middleware(MaxBodySizeMiddleware, max_size=settings.max_body_size_bytes)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

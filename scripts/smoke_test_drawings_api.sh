@@ -205,6 +205,31 @@ HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
     "$BASE_URL/api/wps/v1/drawings")
 assert_status "Reject oversized file (>5 MB)" 413 "$HTTP"
 
+# This is caught by the MaxBodySizeMiddleware, NOT by validate_kmz().
+# We send a raw HTTP request with Content-Length: 11 MB but a tiny body.
+# The middleware rejects before the body is read; validate_kmz() never runs.
+HTTP=$(python3 -c "
+import socket
+host = 'localhost'
+port = ${BASE_URL##*:}
+req = (
+    'POST /api/wps/v1/drawings HTTP/1.1\r\n'
+    f'Host: {host}:{port}\r\n'
+    'Content-Type: application/vnd.google-earth.kmz\r\n'
+    'Content-Length: 11000000\r\n'
+    '\r\n'
+    'x'
+).encode()
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(5)
+s.connect((host, port))
+s.sendall(req)
+resp = s.recv(4096)
+s.close()
+print(resp.split(b'\r\n')[0].split()[1].decode())
+" 2>/dev/null || echo "000")
+assert_status "Reject body >10 MB (middleware, not validation)" 413 "$HTTP"
+
 # --- GET /api/wps/v1/drawings/{id} ---
 echo -e "\n${BOLD}=== GET /api/wps/v1/drawings/{id} ===${NC}"
 

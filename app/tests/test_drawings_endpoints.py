@@ -144,3 +144,21 @@ def test_create_drawing_s3_failure(client: TestClient, valid_kmz_bytes: bytes, s
         assert "AWS error details" not in data["detail"]
     finally:
         del client.app.dependency_overrides[get_s3_service]  # type: ignore  # noqa: PGH003
+
+def test_create_drawing_body_size_exceeded(client: TestClient):
+    """POST with Content-Length exceeding max_body_size_bytes returns 413."""
+    response = client.post(
+        "/api/wps/v1/drawings",
+        content=b"x" * 100,
+        headers={"Content-Length": str(11_000_000)},  # exceeds 10 MB default
+    )
+    assert response.status_code == 413
+    assert "detail" in response.json()
+
+def test_create_drawing_body_size_within_limit(client: TestClient, valid_kmz_bytes: bytes):
+    """POST with Content-Length within limit succeeds normally."""
+    response = client.post(
+        "/api/wps/v1/drawings",
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+    )
+    assert response.status_code == 201
