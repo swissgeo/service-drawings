@@ -4,7 +4,7 @@ Provides validate_kmz() to check uploaded files against size limits and
 ZIP magic bytes to ensure they are valid KMZ archives before storage.
 """
 
-from app.exceptions import InvalidKMZError, KMZTooLargeError
+from app.core.exceptions import InvalidKMZError, KMZTooLargeError
 
 MAX_KMZ_SIZE = 5 * 1024 * 1024  # 5 MB default
 ZIP_MAGIC = b"PK\x03\x04"

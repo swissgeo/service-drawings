@@ -14,9 +14,9 @@ from fastapi import APIRouter, Depends, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import HttpUrl
 
+from app.core.s3 import S3Service, get_s3_service
+from app.core.validation import validate_kmz
 from app.schemas.drawings import DrawingsCreateResponse
-from app.services.s3 import S3Service, get_s3_service
-from app.services.validation import validate_kmz
 from app.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)

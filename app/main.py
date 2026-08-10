@@ -11,6 +11,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import aioboto3
 import yaml
 
 from fastapi import FastAPI, Request
@@ -19,7 +20,7 @@ from fastapi.responses import JSONResponse
 
 from app.api import internal, wps
 from app.api.internal import INTERNAL_TAG
-from app.exceptions import (
+from app.core.exceptions import (
     DrawingNotFoundError,
     InvalidKMZError,
     KMZTooLargeError,
@@ -48,11 +49,11 @@ def get_logging_cfg(config_file: Path) -> dict:  # pragma: no cover
 async def lifespan(_app: FastAPI) -> AsyncGenerator:
     """Handle application startup and shutdown events.
 
-    Initializes OTEL instrumentation on startup and flushes providers on shutdown.
+    Initializes the shared aioboto3 S3 session on startup and flushes
+    OTEL providers on shutdown.
     """
-    # Startup code (runs before application startup)
-
-    # settings = get_settings()
+    logger.info("Initializing S3 session")
+    _app.state.s3_session = aioboto3.Session()
 
     logger.info("Startup tasks completed")
 

@@ -1,6 +1,7 @@
 from collections.abc import Generator
 from contextlib import suppress
 
+import aioboto3
 import boto3
 from moto.server import ThreadedMotoServer
 from mypy_boto3_s3 import S3Client
@@ -92,6 +93,10 @@ def app() -> FastAPI:
     # Do the import here to ensure that the application is initialized after the settings
     # are mocked.
     from app.main import app as fastapi_app  # noqa: PLC0415
+
+    # Pre-initialize the S3 session for tests (normally done in lifespan).
+    # This must happen before any request so that get_s3_client() can read it.
+    fastapi_app.state.s3_session = aioboto3.Session()
 
     return fastapi_app
 

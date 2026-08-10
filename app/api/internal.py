@@ -7,8 +7,8 @@ the public OpenAPI specification.
 
 from fastapi import APIRouter, HTTPException
 
+from app.core.s3 import S3ServiceDep
 from app.schemas.checker import Checker
-from app.services.s3 import S3ServiceDep
 from app.version import __version__
 
 INTERNAL_TAG = "Internal"

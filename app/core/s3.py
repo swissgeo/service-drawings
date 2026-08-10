@@ -1,41 +1,28 @@
 """Async S3 client wrapper for KMZ drawing storage."""
 
 import logging
-from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Annotated
+from collections.abc import AsyncGenerator, AsyncIterator
+from typing import Annotated
 
-import aioboto3
 import botocore.exceptions
+from types_aiobotocore_s3 import S3Client
 
-from fastapi import Depends
+from fastapi import Depends, Request
 
-from app.exceptions import DrawingNotFoundError, S3Error
-from app.settings import get_settings
-
-if TYPE_CHECKING:
-    from app.settings import Settings
+from app.core.exceptions import DrawingNotFoundError, S3Error
+from app.settings import SettingsDep
 
 logger = logging.getLogger(__name__)
 
 _HTTP_NOT_FOUND = 404
 
-_session: aioboto3.Session | None = None
-
-
-def _get_session() -> aioboto3.Session:
-    """Return the module-level aioboto3 session singleton."""
-    global _session  # noqa: PLW0603
-    if _session is None:
-        _session = aioboto3.Session()
-    return _session
-
 
 class S3Service:
     """Async S3 client wrapper for KMZ drawing storage."""
 
-    def __init__(self, bucket: str, endpoint_url: str | None = None) -> None:
+    def __init__(self, client: S3Client, bucket: str) -> None:
+        self._client = client
         self._bucket = bucket
-        self._endpoint_url = endpoint_url
 
     async def upload_kml(self, key: str, data: bytes, content_type: str, sha256: str) -> None:
         """Upload a KMZ file to S3 with SHA-256 metadata.
@@ -51,16 +38,13 @@ class S3Service:
 
         """
         try:
-            async with _get_session().client(  # type: ignore  # noqa: PGH003
-                "s3", endpoint_url=self._endpoint_url
-            ) as client:
-                await client.put_object(
-                    Bucket=self._bucket,
-                    Key=key,
-                    Body=data,
-                    ContentType=content_type,
-                    Metadata={"sha256": sha256},
-                )
+            await self._client.put_object(
+                Bucket=self._bucket,
+                Key=key,
+                Body=data,
+                ContentType=content_type,
+                Metadata={"sha256": sha256},
+            )
         except botocore.exceptions.BotoCoreError as e:
             logger.exception("S3 upload failed for key %s", key)
             raise S3Error(f"S3 upload failed for key {key}: {e}") from e
@@ -80,12 +64,9 @@ class S3Service:
 
         """
         try:
-            async with _get_session().client(  # type: ignore  # noqa: PGH003
-                "s3", endpoint_url=self._endpoint_url
-            ) as client:
-                response = await client.get_object(Bucket=self._bucket, Key=key)
-                async for chunk in response["Body"]:
-                    yield chunk
+            response = await self._client.get_object(Bucket=self._bucket, Key=key)
+            async for chunk in response["Body"]:
+                yield chunk
         except botocore.exceptions.ClientError as e:
             error_code = e.response["Error"]["Code"]
             status_code = e.response["ResponseMetadata"]["HTTPStatusCode"]
@@ -112,11 +93,8 @@ class S3Service:
 
         """
         try:
-            async with _get_session().client(  # type: ignore  # noqa: PGH003
-                "s3", endpoint_url=self._endpoint_url
-            ) as client:
-                response = await client.head_object(Bucket=self._bucket, Key=key)
-                return response.get("Metadata", {})
+            response = await self._client.head_object(Bucket=self._bucket, Key=key)
+            return response.get("Metadata", {})
         except botocore.exceptions.ClientError as e:
             error_code = e.response["Error"]["Code"]
             status_code = e.response["ResponseMetadata"]["HTTPStatusCode"]
@@ -139,36 +117,36 @@ class S3Service:
 
         """
         try:
-            async with _get_session().client(  # type: ignore  # noqa: PGH003
-                "s3", endpoint_url=self._endpoint_url
-            ) as client:
-                await client.head_bucket(Bucket=self._bucket)
-        except botocore.exceptions.BotoCoreError, botocore.exceptions.ClientError:
+            await self._client.head_bucket(Bucket=self._bucket)
+        except (botocore.exceptions.BotoCoreError, botocore.exceptions.ClientError):
             logger.exception("S3 bucket connectivity check failed for bucket %s", self._bucket)
             return False
         else:
             return True
 
+async def get_s3_client(
+    request: Request, settings: SettingsDep
+) -> AsyncGenerator[S3Client]:
+    """FastAPI dependency that provides a per-request S3 client from the shared session.
 
-def get_s3_service(
-    settings: "Settings" = Depends(get_settings),  # noqa: B008, UP037
-) -> "S3Service":  # noqa: UP037
-    """FastAPI dependency that provides a configured S3Service instance.
-
-    Args:
-        settings: Application settings injected via FastAPI dependency.
-
-    Returns:
-        A new S3Service configured with the application's bucket and endpoint.
-
+    The aioboto3 session is created once in the application lifespan and stored
+    on app.state.s3_session. This dependency creates a short-lived S3 client
+    from that shared session for the duration of a single request.
     """
-    return S3Service(
-        bucket=settings.aws_s3_bucket_name,
+    session = request.app.state.s3_session
+    async with session.client(
+        "s3",
         endpoint_url=settings.aws_s3_endpoint_url,
-    )
+    ) as s3_client:
+        yield s3_client
 
+S3ClientDep = Annotated[S3Client, Depends(get_s3_client)]
 
-S3ServiceDep = Annotated[
-    S3Service,
-    Depends(get_s3_service),
-]
+async def get_s3_service(
+    client: S3ClientDep,
+    settings: SettingsDep,
+) -> S3Service:
+    """FastAPI dependency that provides a configured S3Service instance."""
+    return S3Service(client=client, bucket=settings.aws_s3_bucket_name)
+
+S3ServiceDep = Annotated[S3Service, Depends(get_s3_service)]

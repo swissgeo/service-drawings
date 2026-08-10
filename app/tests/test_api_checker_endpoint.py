@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
-from app.services.s3 import S3Service, get_s3_service
+from app.core.s3 import S3Service, get_s3_service
 
 
 def test_api_checker_endpoint(client: TestClient):
@@ -22,9 +22,10 @@ def test_api_checker_ready_endpoint(client: TestClient):
 
 def test_api_checker_ready_unavailable(client: TestClient, settings):
     """GET /checker/ready returns 503 when S3 is unreachable."""
+    from unittest.mock import MagicMock  # noqa: PLC0415
     broken_s3 = S3Service(
+        client=MagicMock(),
         bucket=settings.aws_s3_bucket_name,
-        endpoint_url=settings.aws_s3_endpoint_url,
     )
     broken_s3.check_bucket = AsyncMock(return_value=False)  # type: ignore  # noqa: PGH003
 

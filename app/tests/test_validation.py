@@ -3,8 +3,8 @@ import zipfile
 
 import pytest
 
-from app.exceptions import InvalidKMZError, KMZTooLargeError
-from app.services.validation import MAX_KMZ_SIZE, ZIP_MAGIC, validate_kmz
+from app.core.exceptions import InvalidKMZError, KMZTooLargeError
+from app.core.validation import MAX_KMZ_SIZE, ZIP_MAGIC, validate_kmz
 
 
 def make_minimal_zip() -> bytes:

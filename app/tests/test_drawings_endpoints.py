@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 
 import pytest
 
-from app.exceptions import S3Error
-from app.services.s3 import S3Service, get_s3_service
+from app.core.exceptions import S3Error
+from app.core.s3 import S3Service, get_s3_service
 
 
 @pytest.fixture
@@ -124,9 +124,10 @@ def test_get_drawing_invalid_uuid(client: TestClient):
 
 def test_create_drawing_s3_failure(client: TestClient, valid_kmz_bytes: bytes, settings):
     """POST when S3 upload fails returns 500 with sanitized message."""
+    from unittest.mock import MagicMock  # noqa: PLC0415
     broken_s3 = S3Service(
+        client=MagicMock(),
         bucket=settings.aws_s3_bucket_name,
-        endpoint_url=settings.aws_s3_endpoint_url,
     )
     broken_s3.upload_kml = AsyncMock(side_effect=S3Error("AWS error details here"))  # type: ignore  # noqa: PGH003
 
