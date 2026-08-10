@@ -12,8 +12,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.core.drawings import DrawingsService, DrawingsServiceDep
 from app.schemas.drawings import DrawingsCreateResponse
+from app.settings import get_settings
 
-router = APIRouter(prefix="/api/wps/v1")
+settings = get_settings()
+
+router = APIRouter(prefix=settings.api_prefix)
 
 
 @router.post("/drawings", status_code=201)

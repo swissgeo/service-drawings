@@ -33,6 +33,9 @@ class Settings(BaseSettings):
 
     root_path: str = ""
 
+    # API settings
+    api_prefix: str = "/api/wps/v1"  # Default WPS API path prefix
+
     # OpenAPI settings
     publish_openapi_spec: bool = False
 
@@ -46,10 +49,8 @@ class Settings(BaseSettings):
     # AWS Settings
     aws_endpoint_url: str | None = None
     aws_s3_bucket_name: str
-    aws_s3_endpoint_url: str | None = None
     aws_cloudfront_domain: str
-    max_kmz_size_bytes: int = 5_242_880  # 5 MB default
-    max_body_size_bytes: int = 10_485_760  # 10 MB default (KMZ max + multipart overhead)
+    max_upload_size_bytes: int = 5_242_880  # 5 MB default — single limit checked before upload
 
     # OTEL configuration
     otel_sdk_disabled: bool = False

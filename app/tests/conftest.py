@@ -48,7 +48,6 @@ def settings(moto_server: str) -> Settings:
         cors_origin_regex=r"http://localhost:\d+",
         aws_endpoint_url=moto_server,
         aws_s3_bucket_name="test-bucket",
-        aws_s3_endpoint_url=moto_server,
         aws_cloudfront_domain="test.cloudfront.net",
         root_path="",
         otel_sdk_disabled=True,
@@ -59,7 +58,7 @@ def settings(moto_server: str) -> Settings:
 @pytest.fixture
 def s3_client(settings: Settings) -> S3Client:
     """Fixture to provide an S3 client configured to connect to the mocked AWS server."""
-    return boto3.client("s3", endpoint_url=settings.aws_s3_endpoint_url, region_name="eu-central-1")
+    return boto3.client("s3", endpoint_url=settings.aws_endpoint_url, region_name="eu-central-1")
 
 
 @pytest.fixture(autouse=True)
