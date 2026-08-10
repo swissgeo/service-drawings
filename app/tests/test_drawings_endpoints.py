@@ -6,14 +6,13 @@ updating KMZ drawing files via the FastAPI TestClient with a mocked S3 backend.
 
 import io
 import zipfile
-from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
 import pytest
 
+from app.core.drawings import DrawingsService, get_drawings_service
 from app.core.exceptions import S3Error
-from app.core.s3 import S3Service, get_s3_service
 
 
 @pytest.fixture
@@ -124,14 +123,19 @@ def test_get_drawing_invalid_uuid(client: TestClient):
 
 def test_create_drawing_s3_failure(client: TestClient, valid_kmz_bytes: bytes, settings):
     """POST when S3 upload fails returns 500 with sanitized message."""
-    from unittest.mock import MagicMock  # noqa: PLC0415
+    from unittest.mock import AsyncMock, MagicMock  # noqa: PLC0415
+
+    from app.core.s3 import S3Service  # noqa: PLC0415
+
     broken_s3 = S3Service(
         client=MagicMock(),
         bucket=settings.aws_s3_bucket_name,
     )
     broken_s3.upload_kml = AsyncMock(side_effect=S3Error("AWS error details here"))  # type: ignore  # noqa: PGH003
 
-    client.app.dependency_overrides[get_s3_service] = lambda: broken_s3  # type: ignore  # noqa: PGH003
+    broken_drawings = DrawingsService(s3=broken_s3, settings=settings)
+
+    client.app.dependency_overrides[get_drawings_service] = lambda: broken_drawings  # type: ignore  # noqa: PGH003
 
     try:
         response = client.post(
@@ -144,7 +148,7 @@ def test_create_drawing_s3_failure(client: TestClient, valid_kmz_bytes: bytes, s
         # The message should be sanitized, NOT contain AWS details
         assert "AWS error details" not in data["detail"]
     finally:
-        del client.app.dependency_overrides[get_s3_service]  # type: ignore  # noqa: PGH003
+        del client.app.dependency_overrides[get_drawings_service]  # type: ignore  # noqa: PGH003
 
 def test_create_drawing_body_size_exceeded(client: TestClient):
     """POST with Content-Length exceeding max_body_size_bytes returns 413."""
