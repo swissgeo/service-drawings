@@ -62,28 +62,31 @@ class DrawingsService:
 
         Returns:
             A response containing the drawing ID, admin ID placeholder,
-            and the CloudFront URL where the file can be accessed.
+            and the access URL where the file can be retrieved.
 
         Raises:
             InvalidKMZError: If the uploaded file is not a valid ZIP archive.
-            KMZTooLargeError: If the file exceeds the maximum allowed size.
             S3Error: If the S3 upload operation fails.
 
         """
-        content = await file.read()
+        await validate_kmz(file)
 
-        validate_kmz(content, max_size=self._settings.max_kmz_size_bytes)
+        content_hash = hashlib.sha256()
+        size = 0
+        while chunk := await file.read(1024 * 1024):
+            content_hash.update(chunk)
+            size += len(chunk)
+        await file.seek(0)  # reset so upload_fileobj reads from the start
 
-        content_hash = hashlib.sha256(content).hexdigest()
         drawing_id = uuid.uuid4()
         admin_id = uuid.uuid4()
 
         s3_key = self.build_s3_key(drawing_id)
-        await self._s3.upload_kml(
+        await self._s3.upload_drawing(
             key=s3_key,
-            data=content,
+            fileobj=file.file,
             content_type=self.KMZ_CONTENT_TYPE,
-            sha256=content_hash,
+            sha256=content_hash.hexdigest(),
         )
 
         s3_url = HttpUrl(
@@ -93,8 +96,8 @@ class DrawingsService:
         logger.info(
             "Drawing created: id=%s, size=%d, sha256=%s",
             drawing_id,
-            len(content),
-            content_hash,
+            size,
+            content_hash.hexdigest(),
         )
 
         return DrawingsCreateResponse(
@@ -124,9 +127,9 @@ class DrawingsService:
 
         # Verify the drawing exists before streaming, so that DrawingNotFoundError
         # is raised before the response starts and can be caught by the exception handler.
-        await self._s3.head_kml(s3_key)
+        await self._s3.head_drawing(s3_key)
 
-        return self._s3.get_kml(s3_key), s3_key
+        return self._s3.get_drawing(s3_key), s3_key
 
 
 async def get_drawings_service(

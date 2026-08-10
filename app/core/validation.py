@@ -1,28 +1,31 @@
 """KMZ file validation utilities.
 
-Provides validate_kmz() to check uploaded files against size limits and
-ZIP magic bytes to ensure they are valid KMZ archives before storage.
+Provides validate_kmz() to check that uploaded files are valid KMZ archives
+before storage. Size limits are enforced by the body size middleware, not here.
 """
 
-from app.core.exceptions import InvalidKMZError, KMZTooLargeError
+from fastapi import UploadFile
 
-MAX_KMZ_SIZE = 5 * 1024 * 1024  # 5 MB default
+from app.core.exceptions import InvalidKMZError
+
 ZIP_MAGIC = b"PK\x03\x04"
 
 
-def validate_kmz(content: bytes, max_size: int = MAX_KMZ_SIZE) -> None:
-    """Validate KMZ file content.
+async def validate_kmz(file: UploadFile) -> None:
+    """Validate that an uploaded file starts with the ZIP magic bytes.
+
+    Reads only the first 4 bytes and resets the seek pointer so the
+    caller can read the entire file afterwards.
 
     Args:
-        content: Raw file bytes
-        max_size: Maximum allowed size in bytes (default: 5 MB)
+        file: The uploaded KMZ file.
 
     Raises:
-        KMZTooLargeError: If content exceeds max_size
-        InvalidKMZError: If content does not start with ZIP magic bytes
+        InvalidKMZError: If the file does not start with the ZIP magic bytes.
 
     """
-    if len(content) > max_size:
-        raise KMZTooLargeError(f"File size {len(content)} bytes exceeds maximum {max_size} bytes")
-    if not content.startswith(ZIP_MAGIC):
+    header = await file.read(4)
+    await file.seek(0)  # Reset so the caller can read the entire file
+
+    if not header.startswith(ZIP_MAGIC):
         raise InvalidKMZError("File is not a valid ZIP archive")

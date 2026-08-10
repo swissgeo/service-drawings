@@ -2,7 +2,8 @@
 
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator
-from typing import Annotated
+from http import HTTPStatus
+from typing import Annotated, BinaryIO
 
 import botocore.exceptions
 from types_aiobotocore_s3 import S3Client
@@ -14,8 +15,6 @@ from app.settings import SettingsDep
 
 logger = logging.getLogger(__name__)
 
-_HTTP_NOT_FOUND = 404
-
 
 class S3Service:
     """Async S3 client wrapper for KMZ drawing storage."""
@@ -24,12 +23,16 @@ class S3Service:
         self._client = client
         self._bucket = bucket
 
-    async def upload_kml(self, key: str, data: bytes, content_type: str, sha256: str) -> None:
+    async def upload_drawing(
+        self, key: str, fileobj: BinaryIO, content_type: str, sha256: str
+    ) -> None:
         """Upload a KMZ file to S3 with SHA-256 metadata.
+
+        Streams the file object without loading it into memory.
 
         Args:
             key: S3 object key (e.g. "drawings/{uuid}.kmz")
-            data: KMZ file bytes
+            fileobj: Open seekable binary file object to upload
             content_type: MIME type (application/vnd.google-earth.kmz)
             sha256: Hex digest of the content
 
@@ -38,18 +41,20 @@ class S3Service:
 
         """
         try:
-            await self._client.put_object(
+            await self._client.upload_fileobj(
+                Fileobj=fileobj,
                 Bucket=self._bucket,
                 Key=key,
-                Body=data,
-                ContentType=content_type,
-                Metadata={"sha256": sha256},
+                ExtraArgs={
+                    "ContentType": content_type,
+                    "Metadata": {"sha256": sha256},
+                },
             )
         except botocore.exceptions.BotoCoreError as e:
             logger.exception("S3 upload failed for key %s", key)
             raise S3Error(f"S3 upload failed for key {key}: {e}") from e
 
-    async def get_kml(self, key: str) -> AsyncIterator[bytes]:
+    async def get_drawing(self, key: str) -> AsyncIterator[bytes]:
         """Stream a KMZ file from S3.
 
         Args:
@@ -70,7 +75,7 @@ class S3Service:
         except botocore.exceptions.ClientError as e:
             error_code = e.response["Error"]["Code"]
             status_code = e.response["ResponseMetadata"]["HTTPStatusCode"]
-            if error_code == "NoSuchKey" or status_code == _HTTP_NOT_FOUND:
+            if error_code == "NoSuchKey" or status_code == HTTPStatus.NOT_FOUND:
                 raise DrawingNotFoundError(f"Drawing not found: {key}") from e
             logger.exception("S3 read failed for key %s", key)
             raise S3Error(f"S3 read failed for key {key}: {e}") from e
@@ -78,7 +83,7 @@ class S3Service:
             logger.exception("S3 read failed for key %s", key)
             raise S3Error(f"S3 read failed for key {key}: {e}") from e
 
-    async def head_kml(self, key: str) -> dict[str, str]:
+    async def head_drawing(self, key: str) -> dict[str, str]:
         """Get S3 object metadata without downloading the body.
 
         Args:
@@ -89,28 +94,32 @@ class S3Service:
 
         Raises:
             DrawingNotFoundError: If the object does not exist
-            S3Error: If the S3 head request fails
+            S3Error: If the S3 head request fails or metadata is missing
 
         """
         try:
             response = await self._client.head_object(Bucket=self._bucket, Key=key)
-            return response.get("Metadata", {})
+            metadata = response.get("Metadata")
+            if not metadata:
+                logger.error("Metadata missing for S3 object %s", key)
+                raise S3Error(f"Metadata missing for S3 object {key}")
         except botocore.exceptions.ClientError as e:
             error_code = e.response["Error"]["Code"]
             status_code = e.response["ResponseMetadata"]["HTTPStatusCode"]
-            if error_code == "NoSuchKey" or status_code == _HTTP_NOT_FOUND:
+            if error_code == "NoSuchKey" or status_code == HTTPStatus.NOT_FOUND:
                 raise DrawingNotFoundError(f"Drawing not found: {key}") from e
             logger.exception("S3 head failed for key %s", key)
             raise S3Error(f"S3 head failed for key {key}: {e}") from e
         except botocore.exceptions.BotoCoreError as e:
             logger.exception("S3 head failed for key %s", key)
             raise S3Error(f"S3 head failed for key {key}: {e}") from e
+        else:
+            return metadata
 
     async def check_bucket(self) -> bool:
         """Check whether the configured S3 bucket is accessible.
 
         Performs a head_bucket request to verify S3 connectivity.
-        Used by the Kubernetes readiness probe.
 
         Returns:
             True if the bucket is reachable, False otherwise.
@@ -136,7 +145,7 @@ async def get_s3_client(
     session = request.app.state.s3_session
     async with session.client(
         "s3",
-        endpoint_url=settings.aws_s3_endpoint_url,
+        endpoint_url=settings.aws_endpoint_url,
     ) as s3_client:
         yield s3_client
 

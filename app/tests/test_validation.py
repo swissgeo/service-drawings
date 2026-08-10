@@ -1,10 +1,17 @@
 import io
 import zipfile
 
+from fastapi import UploadFile
+
 import pytest
 
-from app.core.exceptions import InvalidKMZError, KMZTooLargeError
-from app.core.validation import MAX_KMZ_SIZE, ZIP_MAGIC, validate_kmz
+from app.core.exceptions import InvalidKMZError
+from app.core.validation import ZIP_MAGIC, validate_kmz
+
+
+def make_upload(data: bytes) -> UploadFile:
+    """Create an UploadFile wrapping the given bytes."""
+    return UploadFile(file=io.BytesIO(data))
 
 
 def make_minimal_zip() -> bytes:
@@ -15,37 +22,29 @@ def make_minimal_zip() -> bytes:
     return buf.getvalue()
 
 
-def make_padded_zip_bytes(size: int) -> bytes:
-    """Create bytes starting with ZIP magic padded to exactly *size* bytes."""
-    return ZIP_MAGIC + b"\x00" * (size - len(ZIP_MAGIC))
+@pytest.mark.asyncio
+async def test_valid_zip_passes() -> None:
+    """A valid minimal ZIP file should pass validation."""
+    await validate_kmz(make_upload(make_minimal_zip()))
 
 
-class TestValidateKMZ:
-    """Tests for the validate_kmz function."""
+@pytest.mark.asyncio
+async def test_non_zip_fails_with_invalid_kmz() -> None:
+    """Random bytes should raise InvalidKMZError."""
+    with pytest.raises(InvalidKMZError):
+        await validate_kmz(make_upload(b"not a zip"))
 
-    def test_valid_zip_passes(self) -> None:
-        """A valid minimal ZIP file should pass validation."""
-        content = make_minimal_zip()
-        validate_kmz(content)
 
-    def test_non_zip_fails_with_invalid_kmz(self) -> None:
-        """Random bytes should raise InvalidKMZError."""
-        with pytest.raises(InvalidKMZError):
-            validate_kmz(b"not a zip")
+@pytest.mark.asyncio
+async def test_empty_body_fails_with_invalid_kmz() -> None:
+    """Empty content should raise InvalidKMZError (no ZIP magic)."""
+    with pytest.raises(InvalidKMZError):
+        await validate_kmz(make_upload(b""))
 
-    def test_exactly_5mb_passes(self) -> None:
-        """Content exactly at the max size limit should pass."""
-        content = make_padded_zip_bytes(MAX_KMZ_SIZE)
-        assert len(content) == MAX_KMZ_SIZE
-        validate_kmz(content)
 
-    def test_5mb_plus_1_fails_with_too_large(self) -> None:
-        """Content that exceeds max size should raise KMZTooLargeError."""
-        content = make_padded_zip_bytes(MAX_KMZ_SIZE + 1)
-        with pytest.raises(KMZTooLargeError):
-            validate_kmz(content)
-
-    def test_empty_body_fails_with_invalid_kmz(self) -> None:
-        """Empty content should raise InvalidKMZError (no ZIP magic)."""
-        with pytest.raises(InvalidKMZError):
-            validate_kmz(b"")
+@pytest.mark.asyncio
+async def test_seek_pointer_reset() -> None:
+    """After validation the seek pointer should be reset to 0."""
+    upload = make_upload(make_minimal_zip())
+    await validate_kmz(upload)
+    assert await upload.read(4) == ZIP_MAGIC

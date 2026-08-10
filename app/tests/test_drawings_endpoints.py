@@ -131,7 +131,7 @@ def test_create_drawing_s3_failure(client: TestClient, valid_kmz_bytes: bytes, s
         client=MagicMock(),
         bucket=settings.aws_s3_bucket_name,
     )
-    broken_s3.upload_kml = AsyncMock(side_effect=S3Error("AWS error details here"))  # type: ignore  # noqa: PGH003
+    broken_s3.upload_drawing = AsyncMock(side_effect=S3Error("AWS error details here"))  # type: ignore  # noqa: PGH003
 
     broken_drawings = DrawingsService(s3=broken_s3, settings=settings)
 
@@ -151,11 +151,11 @@ def test_create_drawing_s3_failure(client: TestClient, valid_kmz_bytes: bytes, s
         del client.app.dependency_overrides[get_drawings_service]  # type: ignore  # noqa: PGH003
 
 def test_create_drawing_body_size_exceeded(client: TestClient):
-    """POST with Content-Length exceeding max_body_size_bytes returns 413."""
+    """POST with Content-Length exceeding max_upload_size_bytes returns 413."""
     response = client.post(
         "/api/wps/v1/drawings",
         content=b"x" * 100,
-        headers={"Content-Length": str(11_000_000)},  # exceeds 10 MB default
+        headers={"Content-Length": str(11_000_000)},  # exceeds 5 MB default
     )
     assert response.status_code == 413
     assert "detail" in response.json()

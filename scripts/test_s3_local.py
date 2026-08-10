@@ -7,6 +7,7 @@ Usage:
 
 import asyncio
 import hashlib
+import io
 import os
 import sys
 import uuid
@@ -50,36 +51,36 @@ async def main() -> None:
         print()
 
         # Upload
-        print("1. upload_kml ...", end=" ", flush=True)
-        await svc.upload_kml(key, data, "application/vnd.google-earth.kmz", sha256)
+        print("1. upload_drawing ...", end=" ", flush=True)
+        await svc.upload_drawing(key, io.BytesIO(data), "application/vnd.google-earth.kmz", sha256)
         print("OK")
 
         # Head (metadata)
-        print("2. head_kml ...", end=" ", flush=True)
-        meta = await svc.head_kml(key)
+        print("2. head_drawing ...", end=" ", flush=True)
+        meta = await svc.head_drawing(key)
         assert meta["sha256"] == sha256, f"Metadata mismatch: {meta}"
         print(f"OK (metadata={meta})")
 
         # Get (streaming)
-        print("3. get_kml ...", end=" ", flush=True)
-        chunks = [chunk async for chunk in svc.get_kml(key)]
+        print("3. get_drawing ...", end=" ", flush=True)
+        chunks = [chunk async for chunk in svc.get_drawing(key)]
         downloaded = b"".join(chunks)
         assert downloaded == data, f"Content mismatch: {len(downloaded)} != {len(data)}"
         print(f"OK ({len(downloaded):,} bytes)")
 
         # Get non-existent
-        print("4. get_kml (missing) ...", end=" ", flush=True)
+        print("4. get_drawing (missing) ...", end=" ", flush=True)
         try:
-            async for _ in svc.get_kml("drawings/nonexistent.kmz"):
+            async for _ in svc.get_drawing("drawings/nonexistent.kmz"):
                 pass
             print("FAIL (expected DrawingNotFoundError)")
         except DrawingNotFoundError:
             print("OK (DrawingNotFoundError)")
 
         # Head non-existent
-        print("5. head_kml (missing) ...", end=" ", flush=True)
+        print("5. head_drawing (missing) ...", end=" ", flush=True)
         try:
-            await svc.head_kml("drawings/nonexistent.kmz")
+            await svc.head_drawing("drawings/nonexistent.kmz")
             print("FAIL (expected DrawingNotFoundError)")
         except DrawingNotFoundError:
             print("OK (DrawingNotFoundError)")
