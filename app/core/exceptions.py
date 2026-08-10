@@ -1,7 +1,8 @@
 """Custom exception hierarchy for service-drawings.
 
-Defines a base ServiceDrawingsError and four subclasses for specific failure
-modes: invalid KMZ content, oversized files, missing drawings, and S3 errors.
+Defines a base ServiceDrawingsError and three subclasses for specific failure
+modes: invalid KMZ content, missing drawings, and S3 errors. Size limits are
+enforced by the body size middleware, so there is no oversized-file exception.
 """
 
 
@@ -23,13 +24,6 @@ class InvalidKMZError(ServiceDrawingsError):
 
     def __init__(self, message: str | None = None) -> None:
         super().__init__(message or "Invalid KMZ file: not a valid ZIP archive")
-
-
-class KMZTooLargeError(ServiceDrawingsError):
-    """Raised when the uploaded file exceeds the maximum allowed size."""
-
-    def __init__(self, message: str | None = None) -> None:
-        super().__init__(message or "KMZ file exceeds the maximum allowed size")
 
 
 class DrawingNotFoundError(ServiceDrawingsError):

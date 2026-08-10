@@ -23,7 +23,6 @@ from app.api.internal import INTERNAL_TAG
 from app.core.exceptions import (
     DrawingNotFoundError,
     InvalidKMZError,
-    KMZTooLargeError,
     S3Error,
 )
 from app.middlewares.body_size import MaxBodySizeMiddleware
@@ -105,12 +104,6 @@ async def invalid_kmz_handler(_request: Request, exc: InvalidKMZError) -> JSONRe
     return JSONResponse(status_code=400, content={"detail": exc.message})
 
 
-@app.exception_handler(KMZTooLargeError)
-async def kmz_too_large_handler(_request: Request, exc: KMZTooLargeError) -> JSONResponse:
-    """Handle oversized KMZ errors with a 413 Payload Too Large response."""
-    return JSONResponse(status_code=413, content={"detail": exc.message})
-
-
 @app.exception_handler(DrawingNotFoundError)
 async def drawing_not_found_handler(_request: Request, exc: DrawingNotFoundError) -> JSONResponse:
     """Handle missing drawing errors with a 404 Not Found response."""
@@ -125,7 +118,7 @@ async def s3_error_handler(_request: Request, exc: S3Error) -> JSONResponse:
 
 
 # Add middlewares
-app.add_middleware(MaxBodySizeMiddleware, max_size=settings.max_body_size_bytes)
+app.add_middleware(MaxBodySizeMiddleware, max_size=settings.max_upload_size_bytes)
 
 app.add_middleware(
     CORSMiddleware,
