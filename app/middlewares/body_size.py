@@ -4,8 +4,12 @@ Rejects requests whose Content-Length header exceeds a configured maximum
 before the body is read, preventing memory exhaustion from oversized uploads.
 """
 
+import logging
+
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+logger = logging.getLogger(__name__)
 
 
 class MaxBodySizeMiddleware:
@@ -45,6 +49,11 @@ class MaxBodySizeMiddleware:
             if header_name == b"content-length":
                 try:
                     if int(header_value) > self.max_size:
+                        logger.warning(
+                            "Request body of %s bytes exceeds maximum of %s bytes",
+                            header_value.decode(),
+                            self.max_size,
+                        )
                         response = JSONResponse(
                             status_code=413,
                             content={"detail": self._msg},
