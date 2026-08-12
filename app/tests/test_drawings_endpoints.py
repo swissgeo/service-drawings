@@ -51,8 +51,8 @@ def test_create_drawing_valid_kmz(client: TestClient, valid_kmz_bytes: bytes):
     assert "id" in data
     assert "admin_id" in data
     assert "s3_url" in data
-    # s3_url should be a valid HTTPS URL containing the drawing ID
-    assert data["s3_url"].startswith("https://")
+    # s3_url should point to the GET drawing endpoint on the same domain
+    assert data["s3_url"].startswith("http://testserver/api/wps/v1/drawings/")
     assert data["id"] in data["s3_url"]
 
 
@@ -133,7 +133,7 @@ def test_create_drawing_s3_failure(client: TestClient, valid_kmz_bytes: bytes, s
     )
     broken_s3.upload_drawing = AsyncMock(side_effect=S3Error("AWS error details here"))  # type: ignore  # noqa: PGH003
 
-    broken_drawings = DrawingsService(s3=broken_s3, settings=settings)
+    broken_drawings = DrawingsService(s3=broken_s3)
 
     client.app.dependency_overrides[get_drawings_service] = lambda: broken_drawings  # type: ignore  # noqa: PGH003
 

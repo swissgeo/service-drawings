@@ -48,7 +48,6 @@ def settings(moto_server: str) -> Settings:
         cors_origin_regex=r"http://localhost:\d+",
         aws_endpoint_url=moto_server,
         aws_s3_bucket_name="test-bucket",
-        aws_cloudfront_domain="test.cloudfront.net",
         root_path="",
         otel_sdk_disabled=True,
         publish_openapi_spec=True,

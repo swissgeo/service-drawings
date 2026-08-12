@@ -7,7 +7,7 @@ with /api/wps/v1 per SWISSGEO API standards.
 
 import uuid
 
-from fastapi import APIRouter, UploadFile
+from fastapi import APIRouter, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.core.drawings import DrawingsService, DrawingsServiceDep
@@ -21,6 +21,7 @@ router = APIRouter(prefix=settings.api_prefix)
 
 @router.post("/drawings", status_code=201)
 async def create_drawing(
+    request: Request,
     file: UploadFile,
     drawings: DrawingsServiceDep,
 ) -> DrawingsCreateResponse:
@@ -30,15 +31,17 @@ async def create_drawing(
     construction to the DrawingsService.
 
     Args:
+        request: The incoming request, used to build the access URL from the
+            same domain the client used to reach the service.
         file: The KMZ file uploaded as multipart/form-data.
         drawings: DrawingsService dependency.
 
     Returns:
         A response containing the drawing ID, admin ID placeholder,
-        and the CloudFront URL where the file can be accessed.
+        and the access URL where the file can be retrieved.
 
     """
-    return await drawings.create_drawing(file)
+    return await drawings.create_drawing(file, request)
 
 
 @router.get("/drawings/{drawing_id}")

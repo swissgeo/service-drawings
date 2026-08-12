@@ -49,7 +49,6 @@ class Settings(BaseSettings):
     # AWS Settings
     aws_endpoint_url: str | None = None
     aws_s3_bucket_name: str
-    aws_cloudfront_domain: str
     max_upload_size_bytes: int = 5_242_880  # 5 MB default — single limit checked before upload
 
     # OTEL configuration

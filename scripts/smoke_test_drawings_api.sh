@@ -189,8 +189,8 @@ else
     fail "  Response missing admin_id"
 fi
 
-if [[ "$S3_URL" == https://*/*/drawings/"$DRAWING_ID".kmz ]]; then
-    pass "  s3_url format is correct"
+if [[ "$S3_URL" == "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID" ]]; then
+    pass "  s3_url points to GET endpoint on same domain"
 else
     fail "  s3_url format unexpected: $S3_URL"
 fi

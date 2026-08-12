@@ -6,13 +6,12 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import Depends, UploadFile
+from fastapi import Depends, Request, UploadFile
 from pydantic import HttpUrl
 
 from app.core.s3 import S3Service, S3ServiceDep
 from app.core.validation import validate_kmz
 from app.schemas.drawings import DrawingsCreateResponse
-from app.settings import Settings, SettingsDep
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +22,8 @@ class DrawingsService:
     S3_KEY_PREFIX = "drawings"
     KMZ_CONTENT_TYPE = "application/vnd.google-earth.kmz"
 
-    def __init__(self, s3: S3Service, settings: Settings) -> None:
+    def __init__(self, s3: S3Service) -> None:
         self._s3 = s3
-        self._settings = settings
 
     @staticmethod
     def build_s3_key(drawing_id: uuid.UUID) -> str:
@@ -40,25 +38,13 @@ class DrawingsService:
         """
         return f"{DrawingsService.S3_KEY_PREFIX}/{drawing_id}.kmz"
 
-    @staticmethod
-    def build_cloudfront_url(domain: str, drawing_id: uuid.UUID) -> str:
-        """Build the CloudFront URL for accessing a drawing.
-
-        Args:
-            domain: The CloudFront domain hostname (without https:// prefix).
-            drawing_id: The UUID of the drawing.
-
-        Returns:
-            The full HTTPS URL to the KMZ file on CloudFront.
-
-        """
-        return f"https://{domain}/{DrawingsService.S3_KEY_PREFIX}/{drawing_id}.kmz"
-
-    async def create_drawing(self, file: UploadFile) -> DrawingsCreateResponse:
+    async def create_drawing(self, file: UploadFile, request: Request) -> DrawingsCreateResponse:
         """Validate, hash, upload a KMZ drawing and return its metadata.
 
         Args:
             file: The KMZ file uploaded as multipart/form-data.
+            request: The incoming request, used to build the access URL from
+                the same domain the client used to reach the service.
 
         Returns:
             A response containing the drawing ID, admin ID placeholder,
@@ -89,9 +75,9 @@ class DrawingsService:
             sha256=content_hash.hexdigest(),
         )
 
-        s3_url = HttpUrl(
-            self.build_cloudfront_url(self._settings.aws_cloudfront_domain, drawing_id)
-        )
+        # Build the access URL from the request's own domain so the service
+        # stays agnostic of any CDN/infrastructure in front of it
+        s3_url = HttpUrl(str(request.url_for("get_drawing", drawing_id=drawing_id)))
 
         logger.info(
             "Drawing created: id=%s, size=%d, sha256=%s",
@@ -134,10 +120,9 @@ class DrawingsService:
 
 async def get_drawings_service(
     s3: S3ServiceDep,
-    settings: SettingsDep,
 ) -> DrawingsService:
     """FastAPI dependency that provides a configured DrawingsService instance."""
-    return DrawingsService(s3=s3, settings=settings)
+    return DrawingsService(s3=s3)
 
 
 DrawingsServiceDep = Annotated[DrawingsService, Depends(get_drawings_service)]
