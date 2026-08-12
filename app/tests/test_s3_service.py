@@ -1,10 +1,13 @@
 import io
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 
 import aioboto3
+import botocore.exceptions
 
 import pytest
 
-from app.core.exceptions import DrawingNotFoundError
+from app.core.exceptions import DrawingNotFoundError, S3Error
 from app.core.s3 import S3Service
 
 
@@ -90,3 +93,99 @@ async def test_check_bucket_success(settings) -> None:
         svc = S3Service(client=client, bucket=settings.aws_s3_bucket_name)
         result = await svc.check_bucket()
         assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Error-path tests using a mocked client (no moto needed)
+# ---------------------------------------------------------------------------
+
+
+def _client_error(code: str, status: int, operation: str) -> botocore.exceptions.ClientError:
+    """Build a botocore ClientError with the given code and HTTP status."""
+    return botocore.exceptions.ClientError(
+        cast(
+            "Any",
+            {"Error": {"Code": code}, "ResponseMetadata": {"HTTPStatusCode": status}},
+        ),
+        operation,
+    )
+
+
+@pytest.mark.asyncio
+async def test_upload_drawing_botocore_error(settings) -> None:
+    """A BotoCoreError during upload should raise S3Error."""
+    client = MagicMock()
+    client.upload_fileobj = AsyncMock(side_effect=botocore.exceptions.BotoCoreError())
+    svc = S3Service(client=client, bucket=settings.aws_s3_bucket_name)
+
+    with pytest.raises(S3Error):
+        await svc.upload_drawing(
+            "drawings/x.kmz", io.BytesIO(b"data"), "application/vnd.google-earth.kmz", "abc"
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_drawing_client_error(settings) -> None:
+    """A non-NoSuchKey ClientError during read should raise S3Error."""
+    client = MagicMock()
+    client.get_object = AsyncMock(side_effect=_client_error("AccessDenied", 403, "GetObject"))
+    svc = S3Service(client=client, bucket=settings.aws_s3_bucket_name)
+
+    with pytest.raises(S3Error):
+        async for _ in svc.get_drawing("drawings/x.kmz"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_get_drawing_botocore_error(settings) -> None:
+    """A BotoCoreError during read should raise S3Error."""
+    client = MagicMock()
+    client.get_object = AsyncMock(side_effect=botocore.exceptions.BotoCoreError())
+    svc = S3Service(client=client, bucket=settings.aws_s3_bucket_name)
+
+    with pytest.raises(S3Error):
+        async for _ in svc.get_drawing("drawings/x.kmz"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_head_drawing_missing_metadata(settings) -> None:
+    """Head returning no metadata should raise S3Error."""
+    client = MagicMock()
+    client.head_object = AsyncMock(return_value={"Metadata": None})
+    svc = S3Service(client=client, bucket=settings.aws_s3_bucket_name)
+
+    with pytest.raises(S3Error):
+        await svc.head_drawing("drawings/x.kmz")
+
+
+@pytest.mark.asyncio
+async def test_head_drawing_client_error(settings) -> None:
+    """A non-NoSuchKey ClientError during head should raise S3Error."""
+    client = MagicMock()
+    client.head_object = AsyncMock(side_effect=_client_error("AccessDenied", 403, "HeadObject"))
+    svc = S3Service(client=client, bucket=settings.aws_s3_bucket_name)
+
+    with pytest.raises(S3Error):
+        await svc.head_drawing("drawings/x.kmz")
+
+
+@pytest.mark.asyncio
+async def test_head_drawing_botocore_error(settings) -> None:
+    """A BotoCoreError during head should raise S3Error."""
+    client = MagicMock()
+    client.head_object = AsyncMock(side_effect=botocore.exceptions.BotoCoreError())
+    svc = S3Service(client=client, bucket=settings.aws_s3_bucket_name)
+
+    with pytest.raises(S3Error):
+        await svc.head_drawing("drawings/x.kmz")
+
+
+@pytest.mark.asyncio
+async def test_check_bucket_failure(settings) -> None:
+    """check_bucket returns False when the bucket is unreachable."""
+    client = MagicMock()
+    client.head_bucket = AsyncMock(side_effect=_client_error("404", 404, "HeadBucket"))
+    svc = S3Service(client=client, bucket=settings.aws_s3_bucket_name)
+
+    assert await svc.check_bucket() is False
