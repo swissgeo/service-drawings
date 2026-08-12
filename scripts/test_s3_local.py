@@ -31,6 +31,7 @@ TEST_FILE = "France.kmz"
 
 async def main() -> None:
     import aioboto3  # noqa: PLC0415
+
     session = aioboto3.Session()
     async with session.client("s3", endpoint_url=ENDPOINT) as client:  # type: ignore  # noqa: PGH003
         svc = S3Service(client=client, bucket=BUCKET)

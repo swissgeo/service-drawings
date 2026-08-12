@@ -127,15 +127,14 @@ class S3Service:
         """
         try:
             await self._client.head_bucket(Bucket=self._bucket)
-        except (botocore.exceptions.BotoCoreError, botocore.exceptions.ClientError):
+        except botocore.exceptions.BotoCoreError, botocore.exceptions.ClientError:
             logger.exception("S3 bucket connectivity check failed for bucket %s", self._bucket)
             return False
         else:
             return True
 
-async def get_s3_client(
-    request: Request, settings: SettingsDep
-) -> AsyncGenerator[S3Client]:
+
+async def get_s3_client(request: Request, settings: SettingsDep) -> AsyncGenerator[S3Client]:
     """FastAPI dependency that provides a per-request S3 client from the shared session.
 
     The aioboto3 session is created once in the application lifespan and stored
@@ -149,7 +148,9 @@ async def get_s3_client(
     ) as s3_client:
         yield s3_client
 
+
 S3ClientDep = Annotated[S3Client, Depends(get_s3_client)]
+
 
 async def get_s3_service(
     client: S3ClientDep,
@@ -157,5 +158,6 @@ async def get_s3_service(
 ) -> S3Service:
     """FastAPI dependency that provides a configured S3Service instance."""
     return S3Service(client=client, bucket=settings.aws_s3_bucket_name)
+
 
 S3ServiceDep = Annotated[S3Service, Depends(get_s3_service)]

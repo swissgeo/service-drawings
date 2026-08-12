@@ -150,6 +150,7 @@ def test_create_drawing_s3_failure(client: TestClient, valid_kmz_bytes: bytes, s
     finally:
         del client.app.dependency_overrides[get_drawings_service]  # type: ignore  # noqa: PGH003
 
+
 def test_create_drawing_body_size_exceeded(client: TestClient):
     """POST with Content-Length exceeding max_upload_size_bytes returns 413."""
     response = client.post(
@@ -159,6 +160,7 @@ def test_create_drawing_body_size_exceeded(client: TestClient):
     )
     assert response.status_code == 413
     assert "detail" in response.json()
+
 
 def test_create_drawing_body_size_within_limit(client: TestClient, valid_kmz_bytes: bytes):
     """POST with Content-Length within limit succeeds normally."""
