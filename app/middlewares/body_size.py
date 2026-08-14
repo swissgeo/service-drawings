@@ -61,7 +61,11 @@ class MaxBodySizeMiddleware:
                         await response(scope, receive, send)
                         return
                 except ValueError:
-                    pass  # Malformed Content-Length — let the request proceed
+                    # Malformed Content-Length — let the request proceed
+                    logger.debug(
+                        "Malformed Content-Length header, skipping body size check: %r",
+                        header_value.decode(errors="replace"),
+                    )
                 break
 
         await self.app(scope, receive, send)
