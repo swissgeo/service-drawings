@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from app.api import internal, wps
 from app.api.internal import INTERNAL_TAG
 from app.core.exceptions import (
+    DigestMismatchError,
     DrawingNotFoundError,
     InvalidKMZError,
     S3Error,
@@ -101,6 +102,12 @@ if settings.publish_openapi_spec:  # pragma: no cover
 @app.exception_handler(InvalidKMZError)
 async def invalid_kmz_handler(_request: Request, exc: InvalidKMZError) -> JSONResponse:
     """Handle invalid KMZ errors with a 400 Bad Request response."""
+    return JSONResponse(status_code=400, content={"detail": exc.message})
+
+
+@app.exception_handler(DigestMismatchError)
+async def digest_mismatch_handler(_request: Request, exc: DigestMismatchError) -> JSONResponse:
+    """Handle SHA-256 digest mismatch errors with a 400 Bad Request response."""
     return JSONResponse(status_code=400, content={"detail": exc.message})
 
 

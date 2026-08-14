@@ -4,6 +4,7 @@ Tests cover the full request/response cycle for creating, retrieving, and
 updating KMZ drawing files via the FastAPI TestClient with a mocked S3 backend.
 """
 
+import hashlib
 import io
 import zipfile
 
@@ -13,6 +14,11 @@ import pytest
 
 from app.core.drawings import DrawingsService, get_drawings_service
 from app.core.exceptions import S3Error
+
+
+def _sha256(data: bytes) -> str:
+    """Return the SHA-256 hex digest of the given bytes."""
+    return hashlib.sha256(data).hexdigest()
 
 
 @pytest.fixture
@@ -45,6 +51,7 @@ def test_create_drawing_valid_kmz(client: TestClient, valid_kmz_bytes: bytes):
     response = client.post(
         "/api/wps/v1/drawings",
         files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes)},
     )
     assert response.status_code == 201
     data = response.json()
@@ -56,11 +63,23 @@ def test_create_drawing_valid_kmz(client: TestClient, valid_kmz_bytes: bytes):
     assert data["id"] in data["s3_url"]
 
 
+def test_create_drawing_digest_mismatch(client: TestClient, valid_kmz_bytes: bytes):
+    """POST with a wrong SHA-256 returns 400 Bad Request."""
+    response = client.post(
+        "/api/wps/v1/drawings",
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": "0" * 64},
+    )
+    assert response.status_code == 400
+    assert "detail" in response.json()
+
+
 def test_create_drawing_invalid_kmz(client: TestClient, invalid_bytes: bytes):
     """POST a non-ZIP file returns 400 Bad Request."""
     response = client.post(
         "/api/wps/v1/drawings",
         files={"file": ("test.kmz", invalid_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(invalid_bytes)},
     )
     assert response.status_code == 400
     assert "detail" in response.json()
@@ -71,6 +90,7 @@ def test_create_drawing_oversized_kmz(client: TestClient, oversized_bytes: bytes
     response = client.post(
         "/api/wps/v1/drawings",
         files={"file": ("large.kmz", oversized_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(oversized_bytes)},
     )
     assert response.status_code == 413
     assert "detail" in response.json()
@@ -82,6 +102,7 @@ def test_get_drawing_existing(client: TestClient, valid_kmz_bytes: bytes):
     create_resp = client.post(
         "/api/wps/v1/drawings",
         files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes)},
     )
     assert create_resp.status_code == 201
     drawing_id = create_resp.json()["id"]
@@ -107,6 +128,7 @@ def test_update_drawing_not_implemented(client: TestClient, valid_kmz_bytes: byt
     create_resp = client.post(
         "/api/wps/v1/drawings",
         files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes)},
     )
     drawing_id = create_resp.json()["id"]
 
@@ -141,6 +163,7 @@ def test_create_drawing_s3_failure(client: TestClient, valid_kmz_bytes: bytes, s
         response = client.post(
             "/api/wps/v1/drawings",
             files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+            data={"sha256": _sha256(valid_kmz_bytes)},
         )
         assert response.status_code == 500
         data = response.json()
@@ -167,5 +190,6 @@ def test_create_drawing_body_size_within_limit(client: TestClient, valid_kmz_byt
     response = client.post(
         "/api/wps/v1/drawings",
         files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes)},
     )
     assert response.status_code == 201

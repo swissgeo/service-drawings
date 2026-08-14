@@ -9,6 +9,7 @@ from typing import Annotated
 from fastapi import Depends, Request, UploadFile
 from pydantic import HttpUrl
 
+from app.core.exceptions import DigestMismatchError
 from app.core.s3 import S3Service, S3ServiceDep
 from app.core.validation import validate_kmz
 from app.schemas.drawings import DrawingsCreateResponse
@@ -38,13 +39,18 @@ class DrawingsService:
         """
         return f"{DrawingsService.S3_KEY_PREFIX}/{drawing_id}.kmz"
 
-    async def create_drawing(self, file: UploadFile, request: Request) -> DrawingsCreateResponse:
+    async def create_drawing(
+        self, file: UploadFile, request: Request, sha256: str
+    ) -> DrawingsCreateResponse:
         """Validate, hash, upload a KMZ drawing and return its metadata.
 
         Args:
             file: The KMZ file uploaded as multipart/form-data.
             request: The incoming request, used to build the access URL from
                 the same domain the client used to reach the service.
+            sha256: The SHA-256 hex digest of the file, computed by the client
+                before any network transfer. It is verified against the
+                received content and stored as S3 metadata.
 
         Returns:
             A response containing the drawing ID, admin ID placeholder,
@@ -52,6 +58,8 @@ class DrawingsService:
 
         Raises:
             InvalidKMZError: If the uploaded file is not a valid ZIP archive.
+            DigestMismatchError: If the client-provided SHA-256 does not match
+                the received content.
             S3Error: If the S3 upload operation fails.
 
         """
@@ -64,6 +72,13 @@ class DrawingsService:
             size += len(chunk)
         await file.seek(0)  # reset so upload_fileobj reads from the start
 
+        computed_digest = content_hash.hexdigest()
+        if computed_digest != sha256:
+            logger.warning(
+                "SHA-256 digest mismatch: expected=%s, computed=%s", sha256, computed_digest
+            )
+            raise DigestMismatchError
+
         drawing_id = uuid.uuid4()
         admin_id = uuid.uuid4()
 
@@ -72,7 +87,7 @@ class DrawingsService:
             key=s3_key,
             fileobj=file.file,
             content_type=self.KMZ_CONTENT_TYPE,
-            sha256=content_hash.hexdigest(),
+            sha256=sha256,
         )
 
         # Build the access URL from the request's own domain so the service
@@ -83,7 +98,7 @@ class DrawingsService:
             "Drawing created: id=%s, size=%d, sha256=%s",
             drawing_id,
             size,
-            content_hash.hexdigest(),
+            sha256,
         )
 
         return DrawingsCreateResponse(

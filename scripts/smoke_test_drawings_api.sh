@@ -166,8 +166,13 @@ assert_json_field "  body.message=OK" "$RESP" "message" "OK"
 # --- POST /api/wps/v1/drawings ---
 echo -e "\n${BOLD}=== POST /api/wps/v1/drawings ===${NC}"
 
+sha256_of() {
+    sha256sum -b "$1" | awk '{print $1}'
+}
+
 RESP=$(curl -s -w '\n%{http_code}' \
     -F "file=@$TMPDIR/valid.kmz" \
+    -F "sha256=$(sha256_of "$TMPDIR/valid.kmz")" \
     "$BASE_URL/api/wps/v1/drawings")
 BODY="$(echo "$RESP" | sed '$d')"
 HTTP="$(echo "$RESP" | tail -n 1)"
@@ -197,11 +202,13 @@ fi
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
     -F "file=@$TMPDIR/invalid.kmz" \
+    -F "sha256=$(sha256_of "$TMPDIR/invalid.kmz")" \
     "$BASE_URL/api/wps/v1/drawings")
 assert_status "Reject invalid file (not ZIP)" 400 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
     -F "file=@$TMPDIR/oversized.kmz" \
+    -F "sha256=$(sha256_of "$TMPDIR/oversized.kmz")" \
     "$BASE_URL/api/wps/v1/drawings")
 assert_status "Reject oversized file (>5 MB)" 413 "$HTTP"
 

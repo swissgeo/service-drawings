@@ -26,6 +26,13 @@ class InvalidKMZError(ServiceDrawingsError):
         super().__init__(message or "Invalid KMZ file: not a valid ZIP archive")
 
 
+class DigestMismatchError(ServiceDrawingsError):
+    """Raised when the client-provided SHA-256 does not match the uploaded content."""
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or "SHA-256 digest does not match the uploaded content")
+
+
 class DrawingNotFoundError(ServiceDrawingsError):
     """Raised when a requested drawing does not exist in S3."""
 
