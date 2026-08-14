@@ -1,6 +1,7 @@
 """Drawings business logic — validation, S3 storage, URL construction."""
 
 import hashlib
+import hmac
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -50,7 +51,7 @@ class DrawingsService:
                 the same domain the client used to reach the service.
             sha256: The SHA-256 hex digest of the file, computed by the client
                 before any network transfer. It is verified against the
-                received content and stored as S3 metadata.
+                received content (case-insensitively) and stored as S3 metadata.
 
         Returns:
             A response containing the drawing ID, admin ID placeholder,
@@ -65,15 +66,17 @@ class DrawingsService:
         """
         await validate_kmz(file)
 
-        content_hash = hashlib.sha256()
-        size = 0
-        while chunk := await file.read(1024 * 1024):
-            content_hash.update(chunk)
-            size += len(chunk)
+        # file_digest() reads the spooled upload in chunks, so the content is never
+        # fully held in memory. It leaves the pointer at EOF, which also gives the size.
+        # Starlette types UploadFile.file as BinaryIO, but it is always a
+        # SpooledTemporaryFile, which provides the readinto() that file_digest() needs.
+        computed_digest = hashlib.file_digest(file.file, "sha256").hexdigest()  # ty: ignore[invalid-argument-type]
+        size = file.file.tell()
         await file.seek(0)  # reset so upload_fileobj reads from the start
 
-        computed_digest = content_hash.hexdigest()
-        if computed_digest != sha256:
+        # Hex digests are compared case-insensitively: hexdigest() emits lowercase, but
+        # clients may send uppercase (e.g. PowerShell Get-FileHash, Java HexFormat).
+        if not hmac.compare_digest(computed_digest, sha256.lower()):
             logger.warning(
                 "SHA-256 digest mismatch: expected=%s, computed=%s", sha256, computed_digest
             )

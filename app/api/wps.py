@@ -25,7 +25,16 @@ async def create_drawing(
     request: Request,
     file: UploadFile,
     drawings: DrawingsServiceDep,
-    sha256: Annotated[str, Form()],
+    sha256: Annotated[
+        str,
+        Form(
+            pattern=r"^[0-9a-fA-F]{64}$",
+            description=(
+                "SHA-256 hex digest of the KMZ file bytes (not of the multipart body), "
+                "computed by the client before upload. Case-insensitive."
+            ),
+        ),
+    ],
 ) -> DrawingsCreateResponse:
     """Upload a KMZ drawing file to S3 and return its access URL.
 

@@ -74,6 +74,16 @@ def test_create_drawing_digest_mismatch(client: TestClient, valid_kmz_bytes: byt
     assert "detail" in response.json()
 
 
+def test_create_drawing_uppercase_digest(client: TestClient, valid_kmz_bytes: bytes):
+    """POST with a correct SHA-256 in uppercase hex is accepted."""
+    response = client.post(
+        "/api/wps/v1/drawings",
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes).upper()},
+    )
+    assert response.status_code == 201
+
+
 def test_create_drawing_invalid_kmz(client: TestClient, invalid_bytes: bytes):
     """POST a non-ZIP file returns 400 Bad Request."""
     response = client.post(
