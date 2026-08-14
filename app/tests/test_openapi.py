@@ -56,14 +56,7 @@ def test_internal_spec_contains_checker_route(client: TestClient):
     assert "/checker" in spec["paths"]
 
 
-def test_internal_spec_excludes_drawing_routes(client: TestClient):
-    spec = client.get("internal/openapi.json").json()
-
-    # TODO
-    assert spec
-
-
-def test_internal_spec_excludes_state_tag(client: TestClient):
+def test_internal_spec_contains_state_tag(client: TestClient):
     spec = client.get("internal/openapi.json").json()
 
     tag_names = [t["name"] for t in spec["tags"]]
@@ -102,6 +95,26 @@ def test_internal_spec_has_no_422_responses(client: TestClient):
             assert "422" not in operation.get("responses", {}), (
                 f"422 response found at {method.upper()} {path}"
             )
+
+
+def test_public_spec_includes_drawings_routes(client: TestClient):
+    """Verify the public OpenAPI spec contains the drawings endpoints."""
+    spec = client.get("openapi.json").json()
+
+    assert "/api/wps/v1/drawings" in spec["paths"]
+    assert "/api/wps/v1/drawings/{drawing_id}" in spec["paths"]
+
+
+def test_public_spec_has_post_and_get_for_drawings(client: TestClient):
+    """Verify POST and GET methods are documented for drawings routes."""
+    spec = client.get("openapi.json").json()
+
+    drawings_post = spec["paths"]["/api/wps/v1/drawings"]
+    assert "post" in drawings_post
+
+    drawings_get = spec["paths"]["/api/wps/v1/drawings/{drawing_id}"]
+    assert "get" in drawings_get
+    assert "put" in drawings_get  # PUT is also documented (returns 501 in T1)
 
 
 # NOTE: we cannot test whether the internal spec is not served when disabled,

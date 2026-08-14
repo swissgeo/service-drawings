@@ -1,3 +1,9 @@
+"""Dynamic version resolution from git describe --tags.
+
+Extracts the application version by running git describe at import time.
+Falls back to the short commit hash when no tag is found in the history.
+"""
+
 import subprocess
 
 # Note that this file is overwritten during the build

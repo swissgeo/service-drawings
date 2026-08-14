@@ -40,6 +40,7 @@ export UV_ENV_FILE := $(ENV_FILE)
 -include $(ENV_FILE)
 
 CONTAINER_LOGGING_CONFIG := /app/logging-config.yaml
+LOGGING_CONFIG_FILE ?= logging-otel-config.yaml
 
 .env:
 	cp .env.default .env
@@ -58,7 +59,7 @@ git-info: ## Print the current version information
 
 .PHONY: ci
 ci: .env
-	# Create virtual env with all packages for development using the Pipfile.lock
+	# Create virtual env with all packages for development using the lockfile
 	uv sync --frozen
 
 
@@ -67,8 +68,13 @@ setup: .env start-moto start-otel ## Create virtualenv with all packages for dev
 	uv sync
 	$(PRE_COMMIT) install
 	# Start a new shell with the virtualenv activated and the .env file loaded into the environment
-	# variables. The latter is required for django which reads the settings from the environment variables
+	# variables. The latter is required for FastAPI which reads the settings from the environment variables
 	uv run $$SHELL
+
+
+.PHONY: sync
+sync: ## Sync dependencies with lockfile
+	uv sync --frozen
 
 
 .PHONY: format
@@ -130,6 +136,11 @@ lint: ## Run the linter and type checker on the code base
 	$(TY) check
 
 
+.PHONY: check
+check: lint test ## Run lint + typecheck + tests (full CI gate locally)
+	@echo "All checks passed"
+
+
 .PHONY: test-ci
 test-ci: ## Run tests in the CI
 	# NOTE on the CI we do not fail the build if the coverage is below 100% because we want to be
@@ -154,13 +165,11 @@ docker-network:
 
 
 .PHONY: start-moto
-start-moto: docker-network ## Run moto server locally and initialize resources (DynamoDB)
-	# Prepare dynamodb-config
-	set -a && source .env && set +a && envsubst < dynamodb-local-config.json > .dynamodb-local-config.json
+start-moto: docker-network ## Run moto server locally and initialize resources (S3)
 	# reuse existing container if present, otherwise create it via compose
 	docker inspect moto-server >/dev/null 2>&1 && docker start moto-server || docker compose --env-file=${ENV_FILE} up -d moto-server
-	# run one-shot init containers to create DynamoDB table
-	docker compose --env-file=${ENV_FILE} up --remove-orphans init-dynamo
+	# run one-shot init container to create S3 bucket
+	docker compose --env-file=${ENV_FILE} up --remove-orphans init-s3
 
 
 .PHONY: stop-moto
