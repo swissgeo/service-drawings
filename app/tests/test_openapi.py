@@ -114,7 +114,26 @@ def test_public_spec_has_post_and_get_for_drawings(client: TestClient):
 
     drawings_get = spec["paths"]["/api/wps/v1/drawings/{drawing_id}"]
     assert "get" in drawings_get
-    assert "put" in drawings_get  # PUT is also documented (returns 501 in T1)
+    assert "put" in drawings_get
+
+
+def test_public_spec_has_put_error_responses(client: TestClient):
+    """Verify the PUT drawing route documents its error responses."""
+    spec = client.get("openapi.json").json()
+
+    put_op = spec["paths"]["/api/wps/v1/drawings/{drawing_id}"]["put"]
+    for status in ("400", "403", "404"):
+        assert status in put_op["responses"]
+        schema = put_op["responses"][status]["content"]["application/json"]["schema"]
+        assert "$ref" in schema
+
+
+def test_public_spec_includes_drawings_tag(client: TestClient):
+    """Verify the public OpenAPI spec declares the Drawings tag."""
+    spec = client.get("openapi.json").json()
+
+    tag_names = [t["name"] for t in spec.get("tags", [])]
+    assert "Drawings" in tag_names
 
 
 # NOTE: we cannot test whether the internal spec is not served when disabled,

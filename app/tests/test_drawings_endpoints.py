@@ -6,7 +6,9 @@ updating KMZ drawing files via the FastAPI TestClient with a mocked S3 backend.
 
 import hashlib
 import io
+import uuid
 import zipfile
+from datetime import datetime
 
 from fastapi.testclient import TestClient
 
@@ -21,17 +23,21 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _build_kmz(kml_content: str) -> bytes:
+    """Build an in-memory KMZ (ZIP containing doc.kml) with the given KML content."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("doc.kml", kml_content)
+    return buf.getvalue()
+
+
 @pytest.fixture
 def valid_kmz_bytes() -> bytes:
     """Create a valid KMZ file (ZIP containing doc.kml) in memory."""
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(
-            "doc.kml",
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            '<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>',
-        )
-    return buf.getvalue()
+    return _build_kmz(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>'
+    )
 
 
 @pytest.fixture
@@ -132,19 +138,126 @@ def test_get_drawing_not_found(client: TestClient):
     assert "detail" in response.json()
 
 
-def test_update_drawing_not_implemented(client: TestClient, valid_kmz_bytes: bytes):
-    """PUT on a drawing returns 501 Not Implemented."""
-    # First upload a drawing
+def test_update_drawing_success(client: TestClient, valid_kmz_bytes: bytes):
+    """PUT an existing drawing with valid content returns 200 and replaces it."""
     create_resp = client.post(
         "/api/wps/v1/drawings",
         files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
         data={"sha256": _sha256(valid_kmz_bytes)},
     )
+    assert create_resp.status_code == 201
+    drawing_id = create_resp.json()["id"]
+    admin_id = create_resp.json()["admin_id"]
+
+    new_content = _build_kmz(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark/></Document></kml>'
+    )
+    response = client.put(
+        f"/api/wps/v1/drawings/{drawing_id}",
+        params={"admin_id": admin_id},
+        files={"file": ("test.kmz", new_content, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(new_content)},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == drawing_id
+    assert data["admin_id"] == admin_id
+    assert data["s3_url"].startswith("http://testserver/api/wps/v1/drawings/")
+    assert "created_at" in data
+    assert "modified_at" in data
+    assert datetime.fromisoformat(data["modified_at"]) >= datetime.fromisoformat(data["created_at"])
+
+    # The stored content must have been replaced
+    get_resp = client.get(f"/api/wps/v1/drawings/{drawing_id}")
+    assert get_resp.status_code == 200
+    assert get_resp.content == new_content
+
+
+def test_update_drawing_wrong_admin_id(client: TestClient, valid_kmz_bytes: bytes):
+    """PUT with a mismatched admin_id returns 403 Forbidden."""
+    create_resp = client.post(
+        "/api/wps/v1/drawings",
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes)},
+    )
+    assert create_resp.status_code == 201
     drawing_id = create_resp.json()["id"]
 
-    response = client.put(f"/api/wps/v1/drawings/{drawing_id}")
-    assert response.status_code == 501
-    assert response.json() == {"detail": "Not implemented"}
+    response = client.put(
+        f"/api/wps/v1/drawings/{drawing_id}",
+        params={"admin_id": str(uuid.uuid4())},
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes)},
+    )
+    assert response.status_code == 403
+    assert "detail" in response.json()
+
+
+def test_update_drawing_not_found(client: TestClient, valid_kmz_bytes: bytes):
+    """PUT a non-existent drawing returns 404 Not Found."""
+    response = client.put(
+        "/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000",
+        params={"admin_id": str(uuid.uuid4())},
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes)},
+    )
+    assert response.status_code == 404
+    assert "detail" in response.json()
+
+
+def test_update_drawing_unchanged_content(
+    client: TestClient, valid_kmz_bytes: bytes, settings, s3_client
+):
+    """PUT with identical content returns 200 without re-uploading to S3."""
+    create_resp = client.post(
+        "/api/wps/v1/drawings",
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes)},
+    )
+    assert create_resp.status_code == 201
+    drawing_id = create_resp.json()["id"]
+    admin_id = create_resp.json()["admin_id"]
+
+    # Capture the stored metadata and last-modified before the update
+    key = f"drawings/{drawing_id}.kmz"
+    before = s3_client.head_object(Bucket=settings.aws_s3_bucket_name, Key=key)
+    before_last_modified = before["LastModified"]
+    before_metadata = before["Metadata"]
+
+    response = client.put(
+        f"/api/wps/v1/drawings/{drawing_id}",
+        params={"admin_id": admin_id},
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes)},
+    )
+    assert response.status_code == 200
+
+    # No re-upload happened: the object is untouched
+    after = s3_client.head_object(Bucket=settings.aws_s3_bucket_name, Key=key)
+    assert after["LastModified"] == before_last_modified
+    assert after["Metadata"] == before_metadata
+
+
+def test_update_drawing_digest_mismatch(client: TestClient, valid_kmz_bytes: bytes):
+    """PUT with a wrong SHA-256 returns 400 Bad Request."""
+    create_resp = client.post(
+        "/api/wps/v1/drawings",
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes)},
+    )
+    assert create_resp.status_code == 201
+    drawing_id = create_resp.json()["id"]
+    admin_id = create_resp.json()["admin_id"]
+
+    response = client.put(
+        f"/api/wps/v1/drawings/{drawing_id}",
+        params={"admin_id": admin_id},
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": "0" * 64},
+    )
+    assert response.status_code == 400
+    assert "detail" in response.json()
 
 
 def test_get_drawing_invalid_uuid(client: TestClient):

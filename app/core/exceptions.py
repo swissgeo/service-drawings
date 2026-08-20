@@ -1,8 +1,9 @@
 """Custom exception hierarchy for service-drawings.
 
-Defines a base ServiceDrawingsError and three subclasses for specific failure
-modes: invalid KMZ content, missing drawings, and S3 errors. Size limits are
-enforced by the body size middleware, so there is no oversized-file exception.
+Defines a base ServiceDrawingsError and subclasses for specific failure modes:
+invalid KMZ content, digest mismatch, admin identifier mismatch, missing
+drawings, and S3 errors. Size limits are enforced by the body size middleware,
+so there is no oversized-file exception.
 """
 
 
@@ -31,6 +32,13 @@ class DigestMismatchError(ServiceDrawingsError):
 
     def __init__(self, message: str | None = None) -> None:
         super().__init__(message or "SHA-256 digest does not match the uploaded content")
+
+
+class AdminIdMismatchError(ServiceDrawingsError):
+    """Raised when the provided admin_id does not match the stored drawing."""
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or "admin_id does not match the stored drawing")
 
 
 class DrawingNotFoundError(ServiceDrawingsError):

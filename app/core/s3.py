@@ -24,9 +24,9 @@ class S3Service:
         self._bucket = bucket
 
     async def upload_drawing(
-        self, key: str, fileobj: BinaryIO, content_type: str, sha256: str
+        self, key: str, fileobj: BinaryIO, content_type: str, metadata: dict[str, str]
     ) -> None:
-        """Upload a KMZ file to S3 with SHA-256 metadata.
+        """Upload a KMZ file to S3 with the given metadata.
 
         Streams the file object without loading it into memory.
 
@@ -34,7 +34,8 @@ class S3Service:
             key: S3 object key (e.g. "drawings/{uuid}.kmz")
             fileobj: Open seekable binary file object to upload
             content_type: MIME type (application/vnd.google-earth.kmz)
-            sha256: Hex digest of the content
+            metadata: Dict of S3 metadata (sha256, admin_id, created_at,
+                modified_at)
 
         Raises:
             S3Error: If the S3 upload fails
@@ -47,7 +48,7 @@ class S3Service:
                 Key=key,
                 ExtraArgs={
                     "ContentType": content_type,
-                    "Metadata": {"sha256": sha256},
+                    "Metadata": metadata,
                 },
             )
         except botocore.exceptions.BotoCoreError as e:
