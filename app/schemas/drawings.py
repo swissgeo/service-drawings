@@ -16,7 +16,7 @@ class DrawingsCreateResponse(BaseModel):
 
     Attributes:
         id: Unique drawing identifier (UUID4).
-        admin_id: Placeholder admin identifier reserved for future auth (UUID4).
+        admin_id: Admin identifier required to update the drawing.
         s3_url: HTTP URL where the KMZ file can be accessed.
 
     """

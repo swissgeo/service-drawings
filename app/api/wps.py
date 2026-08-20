@@ -8,7 +8,7 @@ with /api/wps/v1 per SWISSGEO API standards.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Form, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.core.drawings import DrawingsService, DrawingsServiceDep
@@ -22,40 +22,33 @@ DRAWINGS_TAG = "Drawings"
 
 router = APIRouter(prefix=settings.api_prefix, tags=[DRAWINGS_TAG])
 
+Sha256Form = Annotated[
+    str,
+    Form(
+        pattern=r"^[0-9a-fA-F]{64}$",
+        description=(
+            "SHA-256 hex digest of the KMZ file bytes (not of the multipart body), "
+            "computed by the client before upload. Case-insensitive."
+        ),
+    ),
+]
+
 
 @router.post("/drawings", status_code=201)
 async def create_drawing(
     request: Request,
-    file: UploadFile,
-    drawings: DrawingsServiceDep,
-    sha256: Annotated[
-        str,
-        Form(
-            pattern=r"^[0-9a-fA-F]{64}$",
-            description=(
-                "SHA-256 hex digest of the KMZ file bytes (not of the multipart body), "
-                "computed by the client before upload. Case-insensitive."
-            ),
-        ),
+    file: Annotated[
+        UploadFile,
+        File(description="The KMZ file to upload. Only KMZ files are accepted."),
     ],
+    drawings: DrawingsServiceDep,
+    sha256: Sha256Form,
 ) -> DrawingsCreateResponse:
     """Upload a KMZ drawing file to S3 and return its access URL.
 
-    Delegates validation, hashing, ID generation, S3 upload, and URL
-    construction to the DrawingsService.
-
-    Args:
-        request: The incoming request, used to build the access URL from the
-            same domain the client used to reach the service.
-        file: The KMZ file uploaded as multipart/form-data.
-        drawings: DrawingsService dependency.
-        sha256: The SHA-256 hex digest of the file, computed by the client
-            before any network transfer. Verified against the received content.
-
-    Returns:
-        A response containing the drawing ID, admin ID placeholder,
-        and the access URL where the file can be retrieved.
-
+    Only KMZ files are accepted. The client must provide the SHA-256 hex
+    digest of the file bytes, which is verified against the received content
+    before storing. Returns the drawing ID, admin ID, and the access URL.
     """
     return await drawings.create_drawing(file, request, sha256)
 
@@ -68,19 +61,7 @@ async def get_drawing(
     """Retrieve a KMZ drawing file by its identifier.
 
     Streams the KMZ binary content directly from S3 with the appropriate
-    Content-Type and Content-Disposition headers for browser download.
-
-    Args:
-        drawing_id: The UUID of the drawing to retrieve.
-        drawings: DrawingsService dependency.
-
-    Returns:
-        A streaming response with the KMZ file binary content.
-
-    Raises:
-        DrawingNotFoundError: If no drawing exists with the given identifier.
-        S3Error: If the S3 read operation fails.
-
+    Content-Type and Content-Disposition headers for an attachment download.
     """
     stream, _ = await drawings.get_drawing(drawing_id)
 
@@ -108,41 +89,24 @@ async def update_drawing(  # noqa: PLR0913
     drawing_id: uuid.UUID,
     admin_id: Annotated[
         uuid.UUID,
-        Query(
+        Form(
             description="Admin identifier required to update the drawing",
             examples=["00000000-0000-0000-0000-000000000000"],
         ),
     ],
-    file: UploadFile,
-    sha256: Annotated[str, Form(pattern=r"^[0-9a-fA-F]{64}$")],
+    file: Annotated[
+        UploadFile,
+        File(description="The KMZ file to upload. Only KMZ files are accepted."),
+    ],
+    sha256: Sha256Form,
     drawings: DrawingsServiceDep,
 ) -> DrawingsUpdateResponse:
     """Update an existing KMZ drawing by overwriting it at the same S3 key.
 
-    Validates the admin_id against the stored metadata, verifies the new
-    content, and replaces the file. If the content is unchanged, the request
-    succeeds without re-uploading.
-
-    Args:
-        request: The incoming request, used to build the access URL from the
-            same domain the client used to reach the service.
-        drawing_id: The UUID of the drawing to update.
-        admin_id: Admin identifier that must match the stored drawing.
-        file: The KMZ file uploaded as multipart/form-data.
-        sha256: The SHA-256 hex digest of the file, computed by the client
-            before any network transfer. Verified against the received content.
-        drawings: DrawingsService dependency.
-
-    Returns:
-        A response containing the drawing ID, admin ID, access URL, and
-        creation/update timestamps.
-
-    Raises:
-        DrawingNotFoundError: If no drawing exists with the given identifier.
-        AdminIdMismatchError: If the admin_id does not match the stored one.
-        InvalidKMZError: If the uploaded file is not a valid ZIP archive.
-        DigestMismatchError: If the client-provided SHA-256 does not match
-            the received content.
-
+    Only KMZ files are accepted. The admin_id must match the stored drawing
+    metadata, otherwise the request is rejected with 403. If the new content
+    is identical to the stored one, the request succeeds without re-uploading.
+    Returns the drawing ID, access token, access URL, and creation/update
+    timestamps.
     """
     return await drawings.update_drawing(drawing_id, admin_id, file, request, sha256)

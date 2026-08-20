@@ -281,19 +281,22 @@ WRONG_ADMIN_ID="00000000-0000-0000-0000-000000000001"
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
-    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID?admin_id=$WRONG_ADMIN_ID")
+    -F "admin_id=$WRONG_ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 assert_status "Reject wrong admin_id" 403 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
-    "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000?admin_id=$ADMIN_ID")
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000")
 assert_status "Update non-existent drawing → 404" 404 "$HTTP"
 
 RESP=$(curl -s -w '\n%{http_code}' -X PUT \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
-    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID?admin_id=$ADMIN_ID")
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 BODY="$(echo "$RESP" | sed '$d')"
 HTTP="$(echo "$RESP" | tail -n 1)"
 assert_status "Update existing drawing" 200 "$HTTP"
@@ -308,7 +311,8 @@ fi
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
-    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID?admin_id=$ADMIN_ID")
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 assert_status "PUT unchanged content → 200" 200 "$HTTP"
 
 HTTP=$(curl -s -w '%{http_code}' -o "$TMPDIR/downloaded2.kmz" \

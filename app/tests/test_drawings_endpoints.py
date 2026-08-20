@@ -155,9 +155,8 @@ def test_update_drawing_success(client: TestClient, valid_kmz_bytes: bytes):
     )
     response = client.put(
         f"/api/wps/v1/drawings/{drawing_id}",
-        params={"admin_id": admin_id},
         files={"file": ("test.kmz", new_content, "application/vnd.google-earth.kmz")},
-        data={"sha256": _sha256(new_content)},
+        data={"admin_id": admin_id, "sha256": _sha256(new_content)},
     )
     assert response.status_code == 200
     data = response.json()
@@ -186,9 +185,8 @@ def test_update_drawing_wrong_admin_id(client: TestClient, valid_kmz_bytes: byte
 
     response = client.put(
         f"/api/wps/v1/drawings/{drawing_id}",
-        params={"admin_id": str(uuid.uuid4())},
         files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
-        data={"sha256": _sha256(valid_kmz_bytes)},
+        data={"admin_id": str(uuid.uuid4()), "sha256": _sha256(valid_kmz_bytes)},
     )
     assert response.status_code == 403
     assert "detail" in response.json()
@@ -198,9 +196,8 @@ def test_update_drawing_not_found(client: TestClient, valid_kmz_bytes: bytes):
     """PUT a non-existent drawing returns 404 Not Found."""
     response = client.put(
         "/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000",
-        params={"admin_id": str(uuid.uuid4())},
         files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
-        data={"sha256": _sha256(valid_kmz_bytes)},
+        data={"admin_id": str(uuid.uuid4()), "sha256": _sha256(valid_kmz_bytes)},
     )
     assert response.status_code == 404
     assert "detail" in response.json()
@@ -227,9 +224,8 @@ def test_update_drawing_unchanged_content(
 
     response = client.put(
         f"/api/wps/v1/drawings/{drawing_id}",
-        params={"admin_id": admin_id},
         files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
-        data={"sha256": _sha256(valid_kmz_bytes)},
+        data={"admin_id": admin_id, "sha256": _sha256(valid_kmz_bytes)},
     )
     assert response.status_code == 200
 
@@ -252,9 +248,8 @@ def test_update_drawing_digest_mismatch(client: TestClient, valid_kmz_bytes: byt
 
     response = client.put(
         f"/api/wps/v1/drawings/{drawing_id}",
-        params={"admin_id": admin_id},
         files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
-        data={"sha256": "0" * 64},
+        data={"admin_id": admin_id, "sha256": "0" * 64},
     )
     assert response.status_code == 400
     assert "detail" in response.json()
