@@ -33,6 +33,11 @@ Sha256Form = Annotated[
     ),
 ]
 
+KmzFile = Annotated[
+    UploadFile,
+    File(description="The KMZ file to upload. Only KMZ files are accepted."),
+]
+
 
 @router.post(
     "/drawings",
@@ -45,10 +50,7 @@ Sha256Form = Annotated[
 )
 async def create_drawing(
     request: Request,
-    file: Annotated[
-        UploadFile,
-        File(description="The KMZ file to upload. Only KMZ files are accepted."),
-    ],
+    file: KmzFile,
     drawings: DrawingsServiceDep,
     sha256: Sha256Form,
 ) -> DrawingsCreateResponse:
@@ -109,10 +111,7 @@ async def update_drawing(  # noqa: PLR0913
             examples=["00000000-0000-0000-0000-000000000000"],
         ),
     ],
-    file: Annotated[
-        UploadFile,
-        File(description="The KMZ file to upload. Only KMZ files are accepted."),
-    ],
+    file: KmzFile,
     sha256: Sha256Form,
     drawings: DrawingsServiceDep,
 ) -> DrawingsUpdateResponse:
