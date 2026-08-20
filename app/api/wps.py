@@ -34,7 +34,15 @@ Sha256Form = Annotated[
 ]
 
 
-@router.post("/drawings", status_code=201)
+@router.post(
+    "/drawings",
+    status_code=201,
+    responses={
+        400: {"model": ErrorResponse},
+        413: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
 async def create_drawing(
     request: Request,
     file: Annotated[
@@ -53,7 +61,13 @@ async def create_drawing(
     return await drawings.create_drawing(file, request, sha256)
 
 
-@router.get("/drawings/{drawing_id}")
+@router.get(
+    "/drawings/{drawing_id}",
+    responses={
+        404: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
 async def get_drawing(
     drawing_id: uuid.UUID,
     drawings: DrawingsServiceDep,
@@ -82,6 +96,7 @@ async def get_drawing(
         403: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         413: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
     },
 )
 async def update_drawing(  # noqa: PLR0913

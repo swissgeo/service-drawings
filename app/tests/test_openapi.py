@@ -128,6 +128,28 @@ def test_public_spec_has_put_error_responses(client: TestClient):
         assert "$ref" in schema
 
 
+def test_public_spec_has_post_error_responses(client: TestClient):
+    """Verify the POST drawing route documents its error responses."""
+    spec = client.get("openapi.json").json()
+
+    post_op = spec["paths"]["/api/wps/v1/drawings"]["post"]
+    for status in ("400", "413", "500"):
+        assert status in post_op["responses"]
+        schema = post_op["responses"][status]["content"]["application/json"]["schema"]
+        assert "$ref" in schema
+
+
+def test_public_spec_has_get_error_responses(client: TestClient):
+    """Verify the GET drawing route documents its error responses."""
+    spec = client.get("openapi.json").json()
+
+    get_op = spec["paths"]["/api/wps/v1/drawings/{drawing_id}"]["get"]
+    for status in ("404", "500"):
+        assert status in get_op["responses"]
+        schema = get_op["responses"][status]["content"]["application/json"]["schema"]
+        assert "$ref" in schema
+
+
 def test_public_spec_includes_drawings_tag(client: TestClient):
     """Verify the public OpenAPI spec declares the Drawings tag."""
     spec = client.get("openapi.json").json()
