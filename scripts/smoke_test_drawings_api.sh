@@ -114,6 +114,20 @@ cat > "$TMPDIR/doc.kml" <<'KML'
 KML
 (cd "$TMPDIR" && zip -q valid.kmz doc.kml)
 
+cat > "$TMPDIR/doc2.kml" <<'KML'
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Updated Smoke Test Drawing</name>
+    <Placemark>
+      <name>Updated Point</name>
+      <Point><coordinates>8.0,47.0,0</coordinates></Point>
+    </Placemark>
+  </Document>
+</kml>
+KML
+(cd "$TMPDIR" && zip -q valid2.kmz doc2.kml)
+
 echo "not a valid ZIP file" > "$TMPDIR/invalid.kmz"
 dd if=/dev/zero of="$TMPDIR/oversized.kmz" bs=1M count=6 2>/dev/null
 
@@ -262,9 +276,54 @@ assert_status "Non-existent drawing → 404" 404 "$HTTP"
 # --- PUT /api/wps/v1/drawings/{id} ---
 echo -e "\n${BOLD}=== PUT /api/wps/v1/drawings/{id} ===${NC}"
 
+WRONG_ADMIN_ID="00000000-0000-0000-0000-000000000001"
+
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    -F "file=@$TMPDIR/valid2.kmz" \
+    -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
+    -F "admin_id=$WRONG_ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
-assert_status "PUT returns 501 Not Implemented" 501 "$HTTP"
+assert_status "Reject wrong admin_id" 403 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    -F "file=@$TMPDIR/valid2.kmz" \
+    -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000")
+assert_status "Update non-existent drawing → 404" 404 "$HTTP"
+
+RESP=$(curl -s -w '\n%{http_code}' -X PUT \
+    -F "file=@$TMPDIR/valid2.kmz" \
+    -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
+BODY="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
+assert_status "Update existing drawing" 200 "$HTTP"
+
+if echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['id'] == '$DRAWING_ID'; assert 'created_at' in d and 'modified_at' in d" 2>/dev/null; then
+    pass "  Response keeps id and contains timestamps"
+else
+    fail "  Response missing id or timestamps: $BODY"
+fi
+
+# Unchanged content short-circuits with 200 (no re-upload)
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    -F "file=@$TMPDIR/valid2.kmz" \
+    -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
+assert_status "PUT unchanged content → 200" 200 "$HTTP"
+
+HTTP=$(curl -s -w '%{http_code}' -o "$TMPDIR/downloaded2.kmz" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
+assert_status "Download updated drawing" 200 "${HTTP##*$'\n'}"
+
+if cmp -s "$TMPDIR/valid2.kmz" "$TMPDIR/downloaded2.kmz"; then
+    pass "  Downloaded content matches updated file"
+else
+    fail "  Downloaded content does NOT match updated file"
+fi
 
 # --- OpenAPI spec ---
 echo -e "\n${BOLD}=== OpenAPI Spec ===${NC}"

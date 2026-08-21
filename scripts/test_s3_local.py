@@ -53,7 +53,15 @@ async def main() -> None:
 
         # Upload
         print("1. upload_drawing ...", end=" ", flush=True)
-        await svc.upload_drawing(key, io.BytesIO(data), "application/vnd.google-earth.kmz", sha256)
+        metadata = {
+            "sha256": sha256,
+            "admin-id": str(uuid.uuid4()),
+            "created-at": "2026-01-01T00:00:00+00:00",
+            "modified-at": "2026-01-01T00:00:00+00:00",
+        }
+        await svc.upload_drawing(
+            key, io.BytesIO(data), "application/vnd.google-earth.kmz", metadata
+        )
         print("OK")
 
         # Head (metadata)

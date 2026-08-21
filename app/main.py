@@ -20,7 +20,9 @@ from fastapi.responses import JSONResponse
 
 from app.api import internal, wps
 from app.api.internal import INTERNAL_TAG
+from app.api.wps import DRAWINGS_TAG
 from app.core.exceptions import (
+    AdminIdMismatchError,
     DigestMismatchError,
     DrawingNotFoundError,
     InvalidKMZError,
@@ -89,6 +91,7 @@ app = FastAPI(
     },
     openapi_url=get_openapi_spec_url(),
     openapi_tags=[
+        {"name": DRAWINGS_TAG, "description": "Drawings management API"},
         {"name": INTERNAL_TAG, "description": "Internal APIs not for external uses"},
     ],
     lifespan=lifespan,
@@ -109,6 +112,12 @@ async def invalid_kmz_handler(_request: Request, exc: InvalidKMZError) -> JSONRe
 async def digest_mismatch_handler(_request: Request, exc: DigestMismatchError) -> JSONResponse:
     """Handle SHA-256 digest mismatch errors with a 400 Bad Request response."""
     return JSONResponse(status_code=400, content={"detail": exc.message})
+
+
+@app.exception_handler(AdminIdMismatchError)
+async def admin_id_mismatch_handler(_request: Request, exc: AdminIdMismatchError) -> JSONResponse:
+    """Handle admin_id mismatch errors with a 403 Forbidden response."""
+    return JSONResponse(status_code=403, content={"detail": exc.message})
 
 
 @app.exception_handler(DrawingNotFoundError)
