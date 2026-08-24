@@ -271,7 +271,7 @@ def test_create_drawing_s3_failure(client: TestClient, valid_kmz_bytes: bytes, s
         client=MagicMock(),
         bucket=settings.aws_s3_bucket_name,
     )
-    broken_s3.upload_drawing = AsyncMock(side_effect=S3Error("AWS error details here"))  # type: ignore  # noqa: PGH003
+    broken_s3.upload_drawing = AsyncMock(side_effect=S3Error("AWS error details here"))
 
     broken_drawings = DrawingsService(s3=broken_s3)
 

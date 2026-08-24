@@ -10,7 +10,7 @@ import json
 from functools import lru_cache
 from typing import Any
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, routing
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse
@@ -24,6 +24,30 @@ _INTERNAL_SPEC_URL = f"/{_INTERNAL_SPEC_PREFIX}/openapi.json"
 _SPEC_URL = "/openapi.json"
 
 
+def _iter_routes(app: FastAPI) -> list[Any]:
+    """Return the app routes flattened, one entry per operation.
+
+    Since FastAPI 0.141 / Starlette 1.6, ``include_router`` stores a single lazy
+    ``_IncludedRouter`` in ``app.routes`` instead of flattening the child routes,
+    so iterating ``app.routes`` directly no longer yields the individual
+    ``APIRoute`` objects. ``iter_route_contexts`` resolves those into contexts
+    that expose the effective path and tags (router prefix and tags merged in),
+    and ``get_openapi`` accepts them in place of routes. Older FastAPI versions
+    allowed by our version constraint lack that helper but already flatten the
+    routes, so fall back to plain iteration there.
+    """
+    iter_route_contexts = getattr(routing, "iter_route_contexts", None)
+    if iter_route_contexts is None:  # pragma: no cover - FastAPI < 0.141
+        return list(app.routes)
+    return list(iter_route_contexts(app.routes))
+
+
+def _is_internal(route: Any) -> bool:
+    """Return whether a route (or route context) is tagged as internal."""
+    original = getattr(route, "original_route", route)
+    return isinstance(original, APIRoute) and INTERNAL_TAG in (getattr(route, "tags", None) or [])
+
+
 def _remove_422(schema: dict[str, Any]) -> None:
     for method_item in schema.get("paths", {}).values():
         for param in method_item.values():
@@ -31,7 +55,7 @@ def _remove_422(schema: dict[str, Any]) -> None:
 
 
 def _build_default_schema(app: FastAPI) -> dict[str, Any]:
-    routes = [r for r in app.routes if not (isinstance(r, APIRoute) and INTERNAL_TAG in r.tags)]
+    routes = [r for r in _iter_routes(app) if not _is_internal(r)]
     tags = [t for t in (app.openapi_tags or []) if t.get("name") != INTERNAL_TAG]
     schema = get_openapi(
         title=app.title,
@@ -50,7 +74,7 @@ def _build_default_schema(app: FastAPI) -> dict[str, Any]:
 
 
 def _build_internal_schema(app: FastAPI) -> dict[str, Any]:
-    routes = [r for r in app.routes if isinstance(r, APIRoute) and INTERNAL_TAG in r.tags]
+    routes = [r for r in _iter_routes(app) if _is_internal(r)]
     tags = [t for t in (app.openapi_tags or []) if t.get("name") == INTERNAL_TAG]
     schema = get_openapi(
         title=f"{app.title} - Internal",

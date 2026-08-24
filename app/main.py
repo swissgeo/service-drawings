@@ -129,7 +129,7 @@ async def drawing_not_found_handler(_request: Request, exc: DrawingNotFoundError
 @app.exception_handler(S3Error)
 async def s3_error_handler(_request: Request, exc: S3Error) -> JSONResponse:
     """Handle S3 operation errors with a 500 Internal Server Error response."""
-    logger.exception("S3 operation failed: %s", exc.message)
+    logger.error("S3 operation failed: %s", exc.message)
     return JSONResponse(status_code=500, content={"detail": "Storage operation failed"})
 
 

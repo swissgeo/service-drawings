@@ -101,7 +101,8 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:  # pragma: no cover
     """Return the cached singleton Settings instance."""
-    return Settings()  # ty: ignore[missing-argument] for production we don't pass parameter we use environment variable
+    # for production we don't pass parameter, we use environment variables
+    return Settings()
 
 
 SettingsDep = Annotated[

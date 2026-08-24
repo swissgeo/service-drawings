@@ -101,7 +101,7 @@ async def get_drawing(
         500: {"model": ErrorResponse},
     },
 )
-async def update_drawing(  # noqa: PLR0913
+async def update_drawing(  # noqa: PLR0913, PLR0917
     request: Request,
     drawing_id: uuid.UUID,
     admin_id: Annotated[
