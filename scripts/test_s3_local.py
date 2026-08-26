@@ -29,7 +29,7 @@ BUCKET = os.environ.get("AWS_S3_BUCKET_NAME", "service-drawings-local")
 TEST_FILE = "France.kmz"
 
 
-async def main() -> None:
+async def main() -> None:  # noqa: PLR0915
     import aioboto3  # noqa: PLC0415
 
     session = aioboto3.Session()
@@ -90,6 +90,19 @@ async def main() -> None:
         print("5. head_drawing (missing) ...", end=" ", flush=True)
         try:
             await svc.head_drawing("drawings/nonexistent.kmz")
+            print("FAIL (expected DrawingNotFoundError)")
+        except DrawingNotFoundError:
+            print("OK (DrawingNotFoundError)")
+
+        # Delete
+        print("6. delete_drawing ...", end=" ", flush=True)
+        await svc.delete_drawing(key)
+        print("OK")
+
+        # Head after delete (should be gone)
+        print("7. head_drawing (after delete) ...", end=" ", flush=True)
+        try:
+            await svc.head_drawing(key)
             print("FAIL (expected DrawingNotFoundError)")
         except DrawingNotFoundError:
             print("OK (DrawingNotFoundError)")
