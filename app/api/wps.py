@@ -41,7 +41,7 @@ KmzFile = Annotated[
 AdminIdForm = Annotated[
     uuid.UUID,
     Form(
-        description="Admin identifier required to delete the drawing",
+        description="Admin identifier required to authorize the operation",
         examples=["00000000-0000-0000-0000-000000000000"],
     ),
 ]
@@ -112,13 +112,7 @@ async def get_drawing(
 async def update_drawing(  # noqa: PLR0913, PLR0917
     request: Request,
     drawing_id: uuid.UUID,
-    admin_id: Annotated[
-        uuid.UUID,
-        Form(
-            description="Admin identifier required to update the drawing",
-            examples=["00000000-0000-0000-0000-000000000000"],
-        ),
-    ],
+    admin_id: AdminIdForm,
     file: KmzFile,
     sha256: Sha256Form,
     drawings: DrawingsServiceDep,
