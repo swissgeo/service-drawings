@@ -117,6 +117,22 @@ class S3Service:
         else:
             return metadata
 
+    async def delete_drawing(self, key: str) -> None:
+        """Delete a KMZ file from S3.
+
+        Args:
+            key: S3 object key
+
+        Raises:
+            S3Error: If the S3 delete fails
+
+        """
+        try:
+            await self._client.delete_object(Bucket=self._bucket, Key=key)
+        except botocore.exceptions.BotoCoreError as e:
+            logger.exception("S3 delete failed for key %s", key)
+            raise S3Error(f"S3 delete failed for key {key}: {e}") from e
+
     async def check_bucket(self) -> bool:
         """Check whether the configured S3 bucket is accessible.
 

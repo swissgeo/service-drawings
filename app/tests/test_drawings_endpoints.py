@@ -311,3 +311,72 @@ def test_create_drawing_body_size_within_limit(client: TestClient, valid_kmz_byt
         data={"sha256": _sha256(valid_kmz_bytes)},
     )
     assert response.status_code == 201
+
+
+def test_delete_drawing_success(client: TestClient, valid_kmz_bytes: bytes):
+    """DELETE an existing drawing with the correct admin_id returns 204 and removes it."""
+    create_resp = client.post(
+        "/api/wps/v1/drawings",
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes)},
+    )
+    assert create_resp.status_code == 201
+    drawing_id = create_resp.json()["id"]
+    admin_id = create_resp.json()["admin_id"]
+
+    response = client.request(
+        "DELETE",
+        f"/api/wps/v1/drawings/{drawing_id}",
+        data={"admin_id": admin_id},
+    )
+    assert response.status_code == 204
+
+    # The drawing must no longer be retrievable
+    get_resp = client.get(f"/api/wps/v1/drawings/{drawing_id}")
+    assert get_resp.status_code == 404
+
+
+def test_delete_drawing_wrong_admin_id(client: TestClient, valid_kmz_bytes: bytes):
+    """DELETE with a mismatched admin_id returns 403 Forbidden."""
+    create_resp = client.post(
+        "/api/wps/v1/drawings",
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"sha256": _sha256(valid_kmz_bytes)},
+    )
+    assert create_resp.status_code == 201
+    drawing_id = create_resp.json()["id"]
+
+    response = client.request(
+        "DELETE",
+        f"/api/wps/v1/drawings/{drawing_id}",
+        data={"admin_id": str(uuid.uuid4())},
+    )
+    assert response.status_code == 403
+    assert "detail" in response.json()
+
+
+def test_delete_drawing_not_found(client: TestClient):
+    """DELETE a non-existent drawing returns 404 Not Found."""
+    response = client.request(
+        "DELETE",
+        "/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000",
+        data={"admin_id": str(uuid.uuid4())},
+    )
+    assert response.status_code == 404
+    assert "detail" in response.json()
+
+
+def test_delete_drawing_missing_admin_id(client: TestClient):
+    """DELETE without the admin_id form field returns 422 Unprocessable Entity."""
+    response = client.request("DELETE", "/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000")
+    assert response.status_code == 422
+
+
+def test_delete_drawing_invalid_uuid(client: TestClient):
+    """DELETE with a malformed UUID returns 422 Unprocessable Entity."""
+    response = client.request(
+        "DELETE",
+        "/api/wps/v1/drawings/not-a-valid-uuid",
+        data={"admin_id": str(uuid.uuid4())},
+    )
+    assert response.status_code == 422

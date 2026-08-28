@@ -272,6 +272,37 @@ class DrawingsService:
 
         return self._s3.get_drawing(s3_key), s3_key
 
+    async def delete_drawing(self, drawing_id: uuid.UUID, admin_id: uuid.UUID) -> None:
+        """Delete a KMZ drawing from S3.
+
+        Verifies the drawing exists and the admin_id matches the stored metadata
+        before deleting the object. The deletion is permanent, the only way to
+        recover it is through S3 versioning.
+
+        Args:
+            drawing_id: The UUID of the drawing to delete.
+            admin_id: Admin identifier that must match the stored drawing.
+
+        Raises:
+            DrawingNotFoundError: If no drawing exists with the given identifier.
+            AdminIdMismatchError: If the admin_id does not match the stored one.
+            S3Error: If the S3 delete operation fails.
+
+        """
+        s3_key = self.build_s3_key(drawing_id)
+
+        # Head the object first so a missing drawing surfaces as a 404 before
+        # the delete is attempted
+        existing = await self._s3.head_drawing(s3_key)
+
+        if existing.get("admin-id") != str(admin_id):
+            logger.warning("admin_id mismatch for drawing %s", drawing_id)
+            raise AdminIdMismatchError
+
+        await self._s3.delete_drawing(s3_key)
+
+        logger.info("Drawing deleted: id=%s", drawing_id)
+
 
 async def get_drawings_service(
     s3: S3ServiceDep,

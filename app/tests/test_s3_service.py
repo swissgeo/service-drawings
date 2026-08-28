@@ -213,3 +213,39 @@ async def test_check_bucket_failure(settings) -> None:
     svc = S3Service(client=client, bucket=settings.aws_s3_bucket_name)
 
     assert await svc.check_bucket() is False
+
+
+@pytest.mark.asyncio
+async def test_delete_drawing_success(settings) -> None:
+    """Upload then delete, verify the object is gone."""
+    session = aioboto3.Session()
+    async with session.client("s3", endpoint_url=settings.aws_endpoint_url) as client:  # type: ignore  # noqa: PGH003
+        svc = S3Service(client=client, bucket=settings.aws_s3_bucket_name)
+        key = "drawings/delete-test.kmz"
+        data = b"content to delete"
+        metadata = {
+            "sha256": "jkl012",
+            "admin-id": "11111111-1111-1111-1111-111111111111",
+            "created-at": "2026-01-01T00:00:00+00:00",
+            "modified-at": "2026-01-01T00:00:00+00:00",
+        }
+
+        await svc.upload_drawing(
+            key, io.BytesIO(data), "application/vnd.google-earth.kmz", metadata
+        )
+
+        await svc.delete_drawing(key)
+
+        with pytest.raises(DrawingNotFoundError):
+            await svc.head_drawing(key)
+
+
+@pytest.mark.asyncio
+async def test_delete_drawing_botocore_error(settings) -> None:
+    """A BotoCoreError during delete should raise S3Error."""
+    client = MagicMock()
+    client.delete_object = AsyncMock(side_effect=botocore.exceptions.BotoCoreError())
+    svc = S3Service(client=client, bucket=settings.aws_s3_bucket_name)
+
+    with pytest.raises(S3Error):
+        await svc.delete_drawing("drawings/x.kmz")

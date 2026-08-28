@@ -325,6 +325,32 @@ else
     fail "  Downloaded content does NOT match updated file"
 fi
 
+# --- DELETE /api/wps/v1/drawings/{id} ---
+echo -e "\n${BOLD}=== DELETE /api/wps/v1/drawings/{id} ===${NC}"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+    -F "admin_id=$WRONG_ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
+assert_status "Reject wrong admin_id" 403 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000")
+assert_status "Delete non-existent drawing → 404" 404 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
+assert_status "Delete without admin_id form field → 422" 422 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
+assert_status "Delete existing drawing → 204" 204 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
+assert_status "Deleted drawing no longer retrievable → 404" 404 "$HTTP"
+
 # --- OpenAPI spec ---
 echo -e "\n${BOLD}=== OpenAPI Spec ===${NC}"
 

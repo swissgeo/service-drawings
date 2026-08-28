@@ -9,7 +9,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from app.core.drawings import DrawingsService, DrawingsServiceDep
 from app.schemas.drawings import DrawingsCreateResponse, DrawingsUpdateResponse
@@ -36,6 +36,14 @@ Sha256Form = Annotated[
 KmzFile = Annotated[
     UploadFile,
     File(description="The KMZ file to upload. Only KMZ files are accepted."),
+]
+
+AdminIdForm = Annotated[
+    uuid.UUID,
+    Form(
+        description="Admin identifier required to authorize the operation",
+        examples=["00000000-0000-0000-0000-000000000000"],
+    ),
 ]
 
 
@@ -104,13 +112,7 @@ async def get_drawing(
 async def update_drawing(  # noqa: PLR0913, PLR0917
     request: Request,
     drawing_id: uuid.UUID,
-    admin_id: Annotated[
-        uuid.UUID,
-        Form(
-            description="Admin identifier required to update the drawing",
-            examples=["00000000-0000-0000-0000-000000000000"],
-        ),
-    ],
+    admin_id: AdminIdForm,
     file: KmzFile,
     sha256: Sha256Form,
     drawings: DrawingsServiceDep,
@@ -124,3 +126,26 @@ async def update_drawing(  # noqa: PLR0913, PLR0917
     timestamps.
     """
     return await drawings.update_drawing(drawing_id, admin_id, file, request, sha256)
+
+
+@router.delete(
+    "/drawings/{drawing_id}",
+    status_code=204,
+    responses={
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+async def delete_drawing(
+    drawing_id: uuid.UUID,
+    admin_id: AdminIdForm,
+    drawings: DrawingsServiceDep,
+) -> Response:
+    """Delete a KMZ drawing.
+
+    The admin_id must match the stored drawing metadata, otherwise the request
+    is rejected with 403. The deletion is permanent.
+    """
+    await drawings.delete_drawing(drawing_id, admin_id)
+    return Response(status_code=204)
