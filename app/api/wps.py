@@ -12,6 +12,7 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
 from app.core.drawings import DrawingsService, DrawingsServiceDep
+from app.core.s3 import CACHE_CONTROL_NO_STORE
 from app.schemas.drawings import DrawingsCreateResponse, DrawingsUpdateResponse
 from app.schemas.errors import ErrorResponse
 from app.settings import get_settings
@@ -94,6 +95,7 @@ async def get_drawing(
         media_type=DrawingsService.KMZ_CONTENT_TYPE,
         headers={
             "Content-Disposition": f'attachment; filename="{drawing_id}.kmz"',
+            "Cache-Control": CACHE_CONTROL_NO_STORE,
         },
     )
 

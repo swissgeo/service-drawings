@@ -15,6 +15,8 @@ from app.settings import SettingsDep
 
 logger = logging.getLogger(__name__)
 
+CACHE_CONTROL_NO_STORE = "no-store, max-age=0"
+
 
 class S3Service:
     """Async S3 client wrapper for KMZ drawing storage."""
@@ -48,6 +50,7 @@ class S3Service:
                 Key=key,
                 ExtraArgs={
                     "ContentType": content_type,
+                    "CacheControl": CACHE_CONTROL_NO_STORE,
                     "Metadata": metadata,
                 },
             )

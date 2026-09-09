@@ -128,6 +128,7 @@ def test_get_drawing_existing(client: TestClient, valid_kmz_bytes: bytes):
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/vnd.google-earth.kmz"
     assert "attachment" in response.headers["content-disposition"]
+    assert response.headers["cache-control"] == "no-store, max-age=0"
     assert response.content == valid_kmz_bytes
 
 
