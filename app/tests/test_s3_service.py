@@ -33,6 +33,7 @@ async def test_upload_drawing_success(settings, s3_client) -> None:
         response = s3_client.head_object(Bucket=settings.aws_s3_bucket_name, Key=key)
         assert response["ContentLength"] == len(data)
         assert response["Metadata"] == metadata
+        assert response["CacheControl"] == "no-store, max-age=0"
 
 
 @pytest.mark.asyncio
