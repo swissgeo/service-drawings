@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # CORS settings
     cors_origins: list[str] = []
     cors_origin_regex: str | None = None
-    cors_method: list[str] = ["GET", "POST"]
+    cors_method: list[str] = ["GET", "POST", "PUT", "DELETE"]
     cors_headers: list[str] = ["*"]
     cors_max_age: int = 600
 
