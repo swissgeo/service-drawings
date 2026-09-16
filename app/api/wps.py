@@ -4,6 +4,13 @@ Provides REST endpoints for creating, retrieving, updating, and deleting KMZ
 drawing files stored in S3 and served through CloudFront, plus endpoints to
 check a drawing_id/admin_id pair and to read a drawing's metadata. All routes
 are prefixed with /api/wps/v1 per SWISSGEO API standards.
+
+Every route that takes an admin_id answers a wrong one with the same 404 as an
+unknown drawing_id, so none of them can be used to discover which drawings
+exist. The admin_id always travels as a form field rather than in the URL,
+which keeps it out of access logs and browser history; the two lookup routes
+are therefore POST rather than GET, and POST rather than PUT because neither
+replaces anything at its target URI.
 """
 
 import uuid
@@ -13,12 +20,12 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
 from app.core.drawings import DrawingsService, DrawingsServiceDep
+from app.core.exceptions import DrawingNotFoundError
 from app.core.s3 import CACHE_CONTROL_NO_STORE
 from app.schemas.drawings import (
     DrawingsCreateResponse,
     DrawingsMetadataResponse,
     DrawingsUpdateResponse,
-    DrawingsValidityResponse,
 )
 from app.schemas.errors import ErrorResponse
 from app.settings import get_settings
@@ -114,7 +121,6 @@ async def get_drawing(
     response_model=DrawingsUpdateResponse,
     responses={
         400: {"model": ErrorResponse},
-        403: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         413: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
@@ -131,17 +137,20 @@ async def update_drawing(  # noqa: PLR0913, PLR0917
     """Update an existing KMZ drawing by overwriting it at the same S3 key.
 
     Only KMZ files are accepted. The admin_id must match the stored drawing
-    metadata, otherwise the request is rejected with 403. If the new content
-    is identical to the stored one, the request succeeds without re-uploading.
-    Returns the drawing ID, access token, access URL, and creation/update
-    timestamps.
+    metadata; an unknown drawing_id and a mismatched admin_id yield the same
+    404 with the same body, so the endpoint cannot be used to discover which
+    drawings exist. If the new content is identical to the stored one, the
+    request succeeds without re-uploading. Returns the drawing ID, access
+    token, access URL, and creation/update timestamps.
     """
     return await drawings.update_drawing(drawing_id, admin_id, file, request, sha256)
 
 
-@router.put(
+@router.post(
     "/drawings/{drawing_id}/is-valid",
+    status_code=204,
     responses={
+        404: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
 )
@@ -149,21 +158,25 @@ async def is_valid_drawing(
     drawing_id: uuid.UUID,
     admin_id: AdminIdForm,
     drawings: DrawingsServiceDep,
-) -> DrawingsValidityResponse:
+) -> Response:
     """Check whether a drawing_id and admin_id combination is valid.
 
-    Always answers with 200 and a boolean: an unknown drawing_id and a
-    mismatched admin_id are reported identically, so the endpoint cannot be
-    used to discover which drawings exist. PUT is used rather than GET so the
-    admin_id stays in the request body instead of the URL.
+    Answers 204 when the pair is valid and 404 when it is not. An unknown
+    drawing_id and a mismatched admin_id yield the same 404 with the same
+    body, so the endpoint cannot be used to discover which drawings exist.
+    POST is used rather than GET so the admin_id stays in the request body
+    instead of the URL; it is not a PUT because nothing is replaced at the
+    target URI.
     """
-    return DrawingsValidityResponse(is_valid=await drawings.is_valid(drawing_id, admin_id))
+    if not await drawings.is_valid(drawing_id, admin_id):
+        raise DrawingNotFoundError
+
+    return Response(status_code=204)
 
 
-@router.put(
+@router.post(
     "/drawings/{drawing_id}/metadata",
     responses={
-        403: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
@@ -176,9 +189,12 @@ async def get_drawing_metadata(
     """Retrieve a drawing's metadata without downloading its content.
 
     Returns the filename used at the last upload and the creation/update
-    timestamps. The admin_id must match the stored drawing metadata, otherwise
-    the request is rejected with 403. PUT is used rather than GET so the
-    admin_id stays in the request body instead of the URL.
+    timestamps. An unknown drawing_id and a mismatched admin_id yield the same
+    404 with the same body, matching is-valid: a 403 here would confirm that a
+    drawing exists to a caller without its admin_id, which is exactly what
+    is-valid is designed not to reveal. POST is used rather than GET so the
+    admin_id stays in the request body instead of the URL; it is not a PUT
+    because nothing is replaced at the target URI.
     """
     return await drawings.get_drawing_metadata(drawing_id, admin_id)
 
@@ -187,7 +203,6 @@ async def get_drawing_metadata(
     "/drawings/{drawing_id}",
     status_code=204,
     responses={
-        403: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
@@ -199,8 +214,10 @@ async def delete_drawing(
 ) -> Response:
     """Delete a KMZ drawing.
 
-    The admin_id must match the stored drawing metadata, otherwise the request
-    is rejected with 403. The deletion is permanent.
+    The admin_id must match the stored drawing metadata; an unknown drawing_id
+    and a mismatched admin_id yield the same 404 with the same body, so the
+    endpoint cannot be used to discover which drawings exist. The deletion is
+    permanent.
     """
     await drawings.delete_drawing(drawing_id, admin_id)
     return Response(status_code=204)

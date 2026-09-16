@@ -97,7 +97,7 @@ Because the name comes from the *last* upload, and `PUT` skips the S3 write when
 
 `PUT /api/wps/v1/drawings/{drawing_id}`
 
-Overwrites an existing drawing at the same S3 key. Requires the `admin_id` returned at creation, otherwise the request is rejected with `403`. If the new content is identical to the stored one, the request succeeds without re-upload.
+Overwrites an existing drawing at the same S3 key. Requires the `admin_id` returned at creation; a wrong one produces the same `404` as an unknown `drawing_id`, so the endpoint cannot be used to discover which drawings exist. If the new content is identical to the stored one, the request succeeds without re-upload.
 
 ```bash
 SHA256=$(sha256sum -b France.kmz | awk '{print $1}')
@@ -125,7 +125,7 @@ curl -sS -X PUT \
 
 `DELETE /api/wps/v1/drawings/{drawing_id}`
 
-Permanently deletes a drawing. Requires the `admin_id` as a form field. The deletion is irreversible.
+Permanently deletes a drawing. Requires the `admin_id` as a form field; a wrong one produces the same `404` as an unknown `drawing_id`, so the endpoint cannot be used to discover which drawings exist. The deletion is irreversible.
 
 ```bash
 curl -sS -X DELETE \
@@ -137,34 +137,28 @@ curl -sS -X DELETE \
 
 ### Check a drawing_id / admin_id pair
 
-`PUT /api/wps/v1/drawings/{drawing_id}/is-valid`
+`POST /api/wps/v1/drawings/{drawing_id}/is-valid`
 
 Reports whether a `drawing_id` and `admin_id` combination identifies an existing drawing, without transferring the file. Useful for a client to confirm it still holds admin rights before offering an edit or delete action.
 
-The response is always `200`. An unknown `drawing_id` and a wrong `admin_id` are reported identically (`is_valid: false`), so the endpoint cannot be used to discover which drawings exist. `PUT` is used rather than `GET` so the `admin_id` travels in the request body instead of the URL, keeping it out of access logs and browser history.
+The answer is carried by the status code alone: `204 No Content` when the pair is valid, `404 Not Found` when it is not. An unknown `drawing_id` and a wrong `admin_id` produce the same `404` with the same body — never a `403` — so the endpoint cannot be used to discover which drawings exist. `POST` is used rather than `GET` so the `admin_id` travels in the request body instead of the URL, keeping it out of access logs and browser history; it is not a `PUT` because nothing is replaced at the target URI.
 
 ```bash
-curl -sS -X PUT \
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
   -F "admin_id=b1a5c8e3-..." \
   http://localhost:8000/api/wps/v1/drawings/f0c4d7a2-.../is-valid
 ```
 
-**Response** — `200 OK`:
-
-```json
-{
-  "is_valid": true
-}
-```
+**Response** — `204 No Content` (empty body) if the pair is valid, otherwise `404 Not Found` with the standard error body.
 
 ### Read a drawing's metadata
 
-`PUT /api/wps/v1/drawings/{drawing_id}/metadata`
+`POST /api/wps/v1/drawings/{drawing_id}/metadata`
 
-Returns a drawing's stored metadata without downloading its content: the filename the client used at the last upload, plus the creation and last-update timestamps. Requires the `admin_id`, otherwise the request is rejected with `403`. As above, `PUT` keeps the `admin_id` out of the URL.
+Returns a drawing's stored metadata without downloading its content: the filename the client used at the last upload, plus the creation and last-update timestamps. Requires the `admin_id`; as with `is-valid`, a wrong one produces the same `404` as an unknown `drawing_id`, so this endpoint cannot be used to discover which drawings exist either. As above, `POST` keeps the `admin_id` out of the URL.
 
 ```bash
-curl -sS -X PUT \
+curl -sS -X POST \
   -F "admin_id=b1a5c8e3-..." \
   http://localhost:8000/api/wps/v1/drawings/f0c4d7a2-.../metadata
 ```
@@ -223,8 +217,7 @@ Application errors follow a uniform `{"detail": "<message>"}` body. The `422` st
 | Status | Meaning |
 |--------|---------|
 | `400` | Invalid KMZ file (not a valid zip) or SHA-256 digest mismatch |
-| `403` | `admin_id` does not match the stored drawing metadata |
-| `404` | Drawing not found |
+| `404` | Drawing not found, or the `admin_id` does not match the stored drawing metadata — the two are deliberately indistinguishable |
 | `413` | Uploaded body exceeds the maximum size (5 MB by default, configurable via `MAX_UPLOAD_SIZE_BYTES`) |
 | `422` | Request validation error (e.g. missing `admin_id` form field) |
 | `500` | Storage (S3) operation failed |
@@ -261,7 +254,7 @@ Two standalone smoke tests live in `scripts/`. They validate the service without
 
 ### `scripts/smoke_test_drawings_api.sh`
 
-End-to-end API smoke test. It generates sample KMZ files, starts a dev server, and exercises the full HTTP surface of the API: health endpoints, upload (valid/invalid/oversized), download (content-type, `Content-Disposition` filename, byte-for-byte match), update (wrong `admin_id`, missing drawing, unchanged content short-circuit), `is-valid` (matching pair, wrong `admin_id`, unknown drawing), `metadata` (filename + timestamps, wrong `admin_id`, missing drawing), delete (including the `422` when `admin_id` is missing, and that both `is-valid` and `metadata` stop answering afterwards), and OpenAPI spec exposure.
+End-to-end API smoke test. It generates sample KMZ files, starts a dev server, and exercises the full HTTP surface of the API: health endpoints, upload (valid/invalid/oversized), download (content-type, `Content-Disposition` filename, byte-for-byte match), update (wrong `admin_id`, missing drawing, unchanged content short-circuit), `is-valid` (matching pair → 204, wrong `admin_id` and unknown drawing → an identical 404), `metadata` (filename + timestamps, wrong `admin_id` and unknown drawing → an identical 404), delete (the same identical 404, that a rejected delete leaves the drawing intact, the `422` when `admin_id` is missing, and that both `is-valid` and `metadata` stop answering afterwards), and OpenAPI spec exposure.
 
 ```bash
 make start-moto                                  # required: local S3 emulator

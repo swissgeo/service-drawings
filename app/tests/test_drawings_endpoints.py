@@ -177,7 +177,12 @@ def test_update_drawing_success(client: TestClient, valid_kmz_bytes: bytes):
 
 
 def test_update_drawing_wrong_admin_id(client: TestClient, valid_kmz_bytes: bytes):
-    """PUT with a mismatched admin_id returns 403 Forbidden."""
+    """PUT with a mismatched admin_id answers 404, not 403.
+
+    As for the read endpoints, a wrong admin_id is indistinguishable from an
+    unknown drawing, so an update cannot be used to probe which identifiers
+    exist.
+    """
     create_resp = client.post(
         "/api/wps/v1/drawings",
         files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
@@ -186,13 +191,19 @@ def test_update_drawing_wrong_admin_id(client: TestClient, valid_kmz_bytes: byte
     assert create_resp.status_code == 201
     drawing_id = create_resp.json()["id"]
 
-    response = client.put(
+    mismatched = client.put(
         f"/api/wps/v1/drawings/{drawing_id}",
         files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
         data={"admin_id": str(uuid.uuid4()), "sha256": _sha256(valid_kmz_bytes)},
     )
-    assert response.status_code == 403
-    assert "detail" in response.json()
+    unknown = client.put(
+        "/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000",
+        files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
+        data={"admin_id": str(uuid.uuid4()), "sha256": _sha256(valid_kmz_bytes)},
+    )
+    assert mismatched.status_code == 404
+    assert unknown.status_code == 404
+    assert mismatched.json() == unknown.json()
 
 
 def test_update_drawing_not_found(client: TestClient, valid_kmz_bytes: bytes):
@@ -340,7 +351,12 @@ def test_delete_drawing_success(client: TestClient, valid_kmz_bytes: bytes):
 
 
 def test_delete_drawing_wrong_admin_id(client: TestClient, valid_kmz_bytes: bytes):
-    """DELETE with a mismatched admin_id returns 403 Forbidden."""
+    """DELETE with a mismatched admin_id answers 404, not 403.
+
+    As for the read endpoints, a wrong admin_id is indistinguishable from an
+    unknown drawing, so a delete cannot be used to probe which identifiers
+    exist.
+    """
     create_resp = client.post(
         "/api/wps/v1/drawings",
         files={"file": ("test.kmz", valid_kmz_bytes, "application/vnd.google-earth.kmz")},
@@ -349,13 +365,22 @@ def test_delete_drawing_wrong_admin_id(client: TestClient, valid_kmz_bytes: byte
     assert create_resp.status_code == 201
     drawing_id = create_resp.json()["id"]
 
-    response = client.request(
+    mismatched = client.request(
         "DELETE",
         f"/api/wps/v1/drawings/{drawing_id}",
         data={"admin_id": str(uuid.uuid4())},
     )
-    assert response.status_code == 403
-    assert "detail" in response.json()
+    unknown = client.request(
+        "DELETE",
+        "/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000",
+        data={"admin_id": str(uuid.uuid4())},
+    )
+    assert mismatched.status_code == 404
+    assert unknown.status_code == 404
+    assert mismatched.json() == unknown.json()
+
+    # The drawing must still be there: a rejected delete must not delete.
+    assert client.get(f"/api/wps/v1/drawings/{drawing_id}").status_code == 200
 
 
 def test_delete_drawing_not_found(client: TestClient):
@@ -409,49 +434,56 @@ def test_create_drawing_records_original_filename(
 
 
 def test_is_valid_matching_pair(client: TestClient, valid_kmz_bytes: bytes):
-    """PUT is-valid with the correct admin_id reports the pair as valid."""
+    """POST is-valid with the correct admin_id answers 204 with an empty body."""
     drawing_id, admin_id = _create(client, valid_kmz_bytes)
 
-    response = client.put(
+    response = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/is-valid", data={"admin_id": admin_id}
     )
-    assert response.status_code == 200
-    assert response.json() == {"is_valid": True}
+    assert response.status_code == 204
+    assert response.content == b""
 
 
 def test_is_valid_wrong_admin_id(client: TestClient, valid_kmz_bytes: bytes):
-    """PUT is-valid with a mismatched admin_id reports the pair as invalid, not 403."""
+    """POST is-valid with a mismatched admin_id answers 404, not 403."""
     drawing_id, _ = _create(client, valid_kmz_bytes)
 
-    response = client.put(
+    response = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/is-valid", data={"admin_id": str(uuid.uuid4())}
     )
-    assert response.status_code == 200
-    assert response.json() == {"is_valid": False}
+    assert response.status_code == 404
 
 
-def test_is_valid_unknown_drawing(client: TestClient):
-    """PUT is-valid for a non-existent drawing reports invalid rather than 404.
+def test_is_valid_unknown_drawing_matches_wrong_admin_id(
+    client: TestClient, valid_kmz_bytes: bytes
+):
+    """An unknown drawing and a wrong admin_id answer identically.
 
-    A missing drawing and a wrong admin_id must be indistinguishable, so the
+    The two must stay indistinguishable down to the response body, so the
     endpoint cannot be used to enumerate existing drawing identifiers.
     """
-    response = client.put(
+    drawing_id, _ = _create(client, valid_kmz_bytes)
+
+    unknown = client.post(
         "/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/is-valid",
         data={"admin_id": str(uuid.uuid4())},
     )
-    assert response.status_code == 200
-    assert response.json() == {"is_valid": False}
+    mismatched = client.post(
+        f"/api/wps/v1/drawings/{drawing_id}/is-valid", data={"admin_id": str(uuid.uuid4())}
+    )
+    assert unknown.status_code == 404
+    assert mismatched.status_code == 404
+    assert unknown.json() == mismatched.json()
 
 
 def test_is_valid_after_delete(client: TestClient, valid_kmz_bytes: bytes):
     """A previously valid pair stops being valid once the drawing is deleted."""
     drawing_id, admin_id = _create(client, valid_kmz_bytes)
     assert (
-        client.put(
+        client.post(
             f"/api/wps/v1/drawings/{drawing_id}/is-valid", data={"admin_id": admin_id}
-        ).json()["is_valid"]
-        is True
+        ).status_code
+        == 204
     )
 
     assert (
@@ -461,32 +493,31 @@ def test_is_valid_after_delete(client: TestClient, valid_kmz_bytes: bytes):
         == 204
     )
 
-    response = client.put(
+    response = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/is-valid", data={"admin_id": admin_id}
     )
-    assert response.status_code == 200
-    assert response.json() == {"is_valid": False}
+    assert response.status_code == 404
 
 
 def test_is_valid_missing_admin_id(client: TestClient):
-    """PUT is-valid without the admin_id form field returns 422."""
-    response = client.put("/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/is-valid")
+    """POST is-valid without the admin_id form field returns 422."""
+    response = client.post("/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/is-valid")
     assert response.status_code == 422
 
 
 def test_is_valid_invalid_uuid(client: TestClient):
-    """PUT is-valid with a malformed drawing UUID returns 422."""
-    response = client.put(
+    """POST is-valid with a malformed drawing UUID returns 422."""
+    response = client.post(
         "/api/wps/v1/drawings/not-a-valid-uuid/is-valid", data={"admin_id": str(uuid.uuid4())}
     )
     assert response.status_code == 422
 
 
 def test_metadata_success(client: TestClient, valid_kmz_bytes: bytes):
-    """PUT metadata returns the original filename and the timestamps."""
+    """POST metadata returns the original filename and the timestamps."""
     drawing_id, admin_id = _create(client, valid_kmz_bytes, filename="France.kmz")
 
-    response = client.put(
+    response = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/metadata", data={"admin_id": admin_id}
     )
     assert response.status_code == 200
@@ -499,7 +530,7 @@ def test_metadata_success(client: TestClient, valid_kmz_bytes: bytes):
 def test_metadata_reflects_update(client: TestClient, valid_kmz_bytes: bytes):
     """After an update, metadata reports the new filename and a later modified_at."""
     drawing_id, admin_id = _create(client, valid_kmz_bytes, filename="before.kmz")
-    before = client.put(
+    before = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/metadata", data={"admin_id": admin_id}
     ).json()
 
@@ -511,7 +542,7 @@ def test_metadata_reflects_update(client: TestClient, valid_kmz_bytes: bytes):
     )
     assert update_resp.status_code == 200
 
-    after = client.put(
+    after = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/metadata", data={"admin_id": admin_id}
     ).json()
     assert after["original_filename"] == "after.kmz"
@@ -530,7 +561,7 @@ def test_metadata_unicode_filename_roundtrip(client: TestClient, valid_kmz_bytes
     """
     drawing_id, admin_id = _create(client, valid_kmz_bytes, filename="Zürich Höhenweg.kmz")
 
-    response = client.put(
+    response = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/metadata", data={"admin_id": admin_id}
     )
     assert response.status_code == 200
@@ -551,7 +582,7 @@ def test_metadata_strips_path_components(
     """Directory components in the client filename are stripped before storage."""
     drawing_id, admin_id = _create(client, valid_kmz_bytes, filename=sent)
 
-    response = client.put(
+    response = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/metadata", data={"admin_id": admin_id}
     )
     assert response.status_code == 200
@@ -562,7 +593,7 @@ def test_metadata_long_filename_is_truncated(client: TestClient, valid_kmz_bytes
     """An over-long filename is truncated so it fits within the S3 metadata limit."""
     drawing_id, admin_id = _create(client, valid_kmz_bytes, filename="a" * 500 + ".kmz")
 
-    response = client.put(
+    response = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/metadata", data={"admin_id": admin_id}
     )
     assert response.status_code == 200
@@ -585,7 +616,7 @@ def test_metadata_legacy_object_without_filename(client: TestClient, settings, s
         },
     )
 
-    response = client.put(
+    response = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/metadata", data={"admin_id": str(admin_id)}
     )
     assert response.status_code == 200
@@ -605,7 +636,7 @@ def test_metadata_unusable_timestamps(client: TestClient, settings, s3_client):
         Metadata={"admin-id": str(admin_id), "created-at": "not-a-timestamp"},
     )
 
-    response = client.put(
+    response = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/metadata", data={"admin_id": str(admin_id)}
     )
     assert response.status_code == 500
@@ -613,19 +644,29 @@ def test_metadata_unusable_timestamps(client: TestClient, settings, s3_client):
 
 
 def test_metadata_wrong_admin_id(client: TestClient, valid_kmz_bytes: bytes):
-    """PUT metadata with a mismatched admin_id returns 403 Forbidden."""
+    """POST metadata with a mismatched admin_id answers 404, not 403.
+
+    A 403 would confirm the drawing exists to a caller without its admin_id,
+    which is what is-valid is designed not to reveal; the weaker of the two
+    endpoints would otherwise set the actual security level.
+    """
     drawing_id, _ = _create(client, valid_kmz_bytes)
 
-    response = client.put(
+    unknown = client.post(
+        "/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/metadata",
+        data={"admin_id": str(uuid.uuid4())},
+    )
+    mismatched = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/metadata", data={"admin_id": str(uuid.uuid4())}
     )
-    assert response.status_code == 403
-    assert "detail" in response.json()
+    assert unknown.status_code == 404
+    assert mismatched.status_code == 404
+    assert unknown.json() == mismatched.json()
 
 
 def test_metadata_not_found(client: TestClient):
-    """PUT metadata for a non-existent drawing returns 404 Not Found."""
-    response = client.put(
+    """POST metadata for a non-existent drawing returns 404 Not Found."""
+    response = client.post(
         "/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/metadata",
         data={"admin_id": str(uuid.uuid4())},
     )
@@ -634,14 +675,14 @@ def test_metadata_not_found(client: TestClient):
 
 
 def test_metadata_missing_admin_id(client: TestClient):
-    """PUT metadata without the admin_id form field returns 422."""
-    response = client.put("/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/metadata")
+    """POST metadata without the admin_id form field returns 422."""
+    response = client.post("/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/metadata")
     assert response.status_code == 422
 
 
 def test_metadata_invalid_uuid(client: TestClient):
-    """PUT metadata with a malformed drawing UUID returns 422."""
-    response = client.put(
+    """POST metadata with a malformed drawing UUID returns 422."""
+    response = client.post(
         "/api/wps/v1/drawings/not-a-valid-uuid/metadata", data={"admin_id": str(uuid.uuid4())}
     )
     assert response.status_code == 422
@@ -658,7 +699,7 @@ def test_metadata_path_only_filename_falls_back(
     """
     drawing_id, admin_id = _create(client, valid_kmz_bytes, filename=sent)
 
-    response = client.put(
+    response = client.post(
         f"/api/wps/v1/drawings/{drawing_id}/metadata", data={"admin_id": admin_id}
     )
     assert response.status_code == 200

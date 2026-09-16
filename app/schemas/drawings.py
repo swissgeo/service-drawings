@@ -2,8 +2,8 @@
 
 Defines the response schemas returned after successful KMZ drawing creation
 and update, containing the drawing identifier, admin identifier, S3 URL, and
-timestamps, as well as the schemas for the validity check and the metadata
-lookup.
+timestamps, as well as the schema for the metadata lookup. The validity check
+answers with a bare status code and so has no schema.
 """
 
 from datetime import datetime
@@ -45,23 +45,6 @@ class DrawingsUpdateResponse(DrawingsCreateResponse):
     modified_at: datetime = Field(
         description="Last update timestamp",
         examples=["2026-01-01T12:00:00+00:00"],
-    )
-
-
-class DrawingsValidityResponse(BaseModel):
-    """Response model returned by the drawing validity check.
-
-    Attributes:
-        is_valid: Whether the drawing_id/admin_id combination identifies an
-            existing drawing. False both when the drawing does not exist and
-            when the admin_id does not match, so the check never reveals the
-            existence of a drawing to a caller without its admin_id.
-
-    """
-
-    is_valid: bool = Field(
-        description=("True when the drawing exists and the given admin_id matches the stored one"),
-        examples=[True],
     )
 
 

@@ -80,7 +80,11 @@ class S3Service:
             error_code = e.response["Error"]["Code"]
             status_code = e.response["ResponseMetadata"]["HTTPStatusCode"]
             if error_code == "NoSuchKey" or status_code == HTTPStatus.NOT_FOUND:
-                raise DrawingNotFoundError(f"Drawing not found: {key}") from e
+                # The key is logged, not returned: the message reaches the client
+                # verbatim, and a body that varies with the key would let a caller
+                # tell a missing drawing from one whose admin_id simply did not match.
+                logger.info("Drawing not found for key %s", key)
+                raise DrawingNotFoundError from e
             logger.exception("S3 read failed for key %s", key)
             raise S3Error(f"S3 read failed for key {key}: {e}") from e
         except botocore.exceptions.BotoCoreError as e:
@@ -111,7 +115,11 @@ class S3Service:
             error_code = e.response["Error"]["Code"]
             status_code = e.response["ResponseMetadata"]["HTTPStatusCode"]
             if error_code == "NoSuchKey" or status_code == HTTPStatus.NOT_FOUND:
-                raise DrawingNotFoundError(f"Drawing not found: {key}") from e
+                # The key is logged, not returned: the message reaches the client
+                # verbatim, and a body that varies with the key would let a caller
+                # tell a missing drawing from one whose admin_id simply did not match.
+                logger.info("Drawing not found for key %s", key)
+                raise DrawingNotFoundError from e
             logger.exception("S3 head failed for key %s", key)
             raise S3Error(f"S3 head failed for key {key}: {e}") from e
         except botocore.exceptions.BotoCoreError as e:

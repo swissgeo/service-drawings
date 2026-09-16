@@ -14,7 +14,6 @@ from fastapi import Depends, Request, UploadFile
 from pydantic import HttpUrl
 
 from app.core.exceptions import (
-    AdminIdMismatchError,
     DigestMismatchError,
     DrawingNotFoundError,
     S3Error,
@@ -255,8 +254,12 @@ class DrawingsService:
             creation/update timestamps.
 
         Raises:
-            DrawingNotFoundError: If no drawing exists with the given identifier.
-            AdminIdMismatchError: If the admin_id does not match the stored one.
+            DrawingNotFoundError: If no drawing exists with the given
+                identifier, or if the admin_id does not match the stored one.
+                The two are deliberately not distinguished, for the same reason
+                as in is_valid(): a distinct error for a wrong admin_id would
+                confirm that a drawing exists, letting this endpoint be used to
+                probe which identifiers are in use.
             InvalidKMZError: If the uploaded file is not a valid ZIP archive.
             DigestMismatchError: If the client-provided SHA-256 does not match
                 the received content.
@@ -269,9 +272,10 @@ class DrawingsService:
         # any expensive validation happens
         existing = await self._s3.head_drawing(s3_key)
 
-        if existing.get("admin-id") != str(admin_id):
+        # Constant-time, like is_valid(): this is an oracle on a secret value.
+        if not hmac.compare_digest(existing.get("admin-id", ""), str(admin_id)):
             logger.warning("admin_id mismatch for drawing %s", drawing_id)
-            raise AdminIdMismatchError
+            raise DrawingNotFoundError
 
         await validate_kmz(file)
         size = await self._validate_digest(file, sha256)
@@ -413,8 +417,12 @@ class DrawingsService:
             drawings stored before it was recorded.
 
         Raises:
-            DrawingNotFoundError: If no drawing exists with the given identifier.
-            AdminIdMismatchError: If the admin_id does not match the stored one.
+            DrawingNotFoundError: If no drawing exists with the given
+                identifier, or if the admin_id does not match the stored one.
+                The two are deliberately not distinguished, for the same reason
+                as in is_valid(): a distinct error for a wrong admin_id would
+                confirm that a drawing exists, letting this endpoint be used to
+                probe which identifiers are in use.
             S3Error: If the S3 head request fails or the stored timestamps are
                 missing or unparsable.
 
@@ -423,9 +431,10 @@ class DrawingsService:
 
         existing = await self._s3.head_drawing(s3_key)
 
+        # Constant-time, like is_valid(): this is an oracle on a secret value.
         if not hmac.compare_digest(existing.get("admin-id", ""), str(admin_id)):
             logger.warning("admin_id mismatch for drawing %s", drawing_id)
-            raise AdminIdMismatchError
+            raise DrawingNotFoundError
 
         # Unlike the update path, which reads timestamps it has just written,
         # this is a read of arbitrarily old objects, so corrupt or pre-existing
@@ -456,8 +465,12 @@ class DrawingsService:
             admin_id: Admin identifier that must match the stored drawing.
 
         Raises:
-            DrawingNotFoundError: If no drawing exists with the given identifier.
-            AdminIdMismatchError: If the admin_id does not match the stored one.
+            DrawingNotFoundError: If no drawing exists with the given
+                identifier, or if the admin_id does not match the stored one.
+                The two are deliberately not distinguished, for the same reason
+                as in is_valid(): a distinct error for a wrong admin_id would
+                confirm that a drawing exists, letting this endpoint be used to
+                probe which identifiers are in use.
             S3Error: If the S3 delete operation fails.
 
         """
@@ -467,9 +480,10 @@ class DrawingsService:
         # the delete is attempted
         existing = await self._s3.head_drawing(s3_key)
 
-        if existing.get("admin-id") != str(admin_id):
+        # Constant-time, like is_valid(): this is an oracle on a secret value.
+        if not hmac.compare_digest(existing.get("admin-id", ""), str(admin_id)):
             logger.warning("admin_id mismatch for drawing %s", drawing_id)
-            raise AdminIdMismatchError
+            raise DrawingNotFoundError
 
         await self._s3.delete_drawing(s3_key)
 

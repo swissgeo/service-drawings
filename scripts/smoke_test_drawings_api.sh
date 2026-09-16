@@ -308,7 +308,7 @@ HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
     -F "admin_id=$WRONG_ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
-assert_status "Reject wrong admin_id" 403 "$HTTP"
+assert_status "Wrong admin_id → 404 (not 403)" 404 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
     -F "file=@$TMPDIR/valid2.kmz" \
@@ -356,43 +356,51 @@ assert_header \
     "content-disposition" \
     "attachment; filename=\"valid2.kmz\"; filename*=UTF-8''valid2.kmz"
 
-# --- PUT /api/wps/v1/drawings/{id}/is-valid ---
-echo -e "\n${BOLD}=== PUT /api/wps/v1/drawings/{id}/is-valid ===${NC}"
+# --- POST /api/wps/v1/drawings/{id}/is-valid ---
+echo -e "\n${BOLD}=== POST /api/wps/v1/drawings/{id}/is-valid ===${NC}"
 
-RESP=$(curl -s -w '\n%{http_code}' -X PUT \
+RESP=$(curl -s -w '\n%{http_code}' -X POST \
     -F "admin_id=$ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/is-valid")
 BODY="$(echo "$RESP" | sed '$d')"
 HTTP="$(echo "$RESP" | tail -n 1)"
-assert_status "Matching drawing_id/admin_id pair" 200 "$HTTP"
-assert_json_field "  body.is_valid=true" "$BODY" "is_valid" "True"
+assert_status "Matching drawing_id/admin_id pair" 204 "$HTTP"
+if [[ -z "$BODY" ]]; then
+    pass "  Empty body"
+else
+    fail "  Expected an empty body, got '$BODY'"
+fi
 
-# A wrong admin_id must answer 200/false, not 403: the check must not double as
-# an oracle telling an attacker which drawing identifiers exist.
-RESP=$(curl -s -w '\n%{http_code}' -X PUT \
+# A wrong admin_id must answer exactly like an unknown drawing: the check must
+# not double as an oracle telling an attacker which drawing identifiers exist.
+RESP=$(curl -s -w '\n%{http_code}' -X POST \
     -F "admin_id=$WRONG_ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/is-valid")
-BODY="$(echo "$RESP" | sed '$d')"
+MISMATCH_BODY="$(echo "$RESP" | sed '$d')"
 HTTP="$(echo "$RESP" | tail -n 1)"
-assert_status "Wrong admin_id → 200 (not 403)" 200 "$HTTP"
-assert_json_field "  body.is_valid=false" "$BODY" "is_valid" "False"
+assert_status "Wrong admin_id → 404 (not 403)" 404 "$HTTP"
 
-RESP=$(curl -s -w '\n%{http_code}' -X PUT \
+RESP=$(curl -s -w '\n%{http_code}' -X POST \
     -F "admin_id=$ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/is-valid")
-BODY="$(echo "$RESP" | sed '$d')"
+UNKNOWN_BODY="$(echo "$RESP" | sed '$d')"
 HTTP="$(echo "$RESP" | tail -n 1)"
-assert_status "Unknown drawing → 200 (not 404)" 200 "$HTTP"
-assert_json_field "  body.is_valid=false" "$BODY" "is_valid" "False"
+assert_status "Unknown drawing → 404" 404 "$HTTP"
 
-HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+if [[ "$MISMATCH_BODY" == "$UNKNOWN_BODY" ]]; then
+    pass "  Wrong admin_id and unknown drawing are indistinguishable"
+else
+    fail "  Responses differ: '$MISMATCH_BODY' vs '$UNKNOWN_BODY'"
+fi
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/is-valid")
 assert_status "Without admin_id form field → 422" 422 "$HTTP"
 
-# --- PUT /api/wps/v1/drawings/{id}/metadata ---
-echo -e "\n${BOLD}=== PUT /api/wps/v1/drawings/{id}/metadata ===${NC}"
+# --- POST /api/wps/v1/drawings/{id}/metadata ---
+echo -e "\n${BOLD}=== POST /api/wps/v1/drawings/{id}/metadata ===${NC}"
 
-RESP=$(curl -s -w '\n%{http_code}' -X PUT \
+RESP=$(curl -s -w '\n%{http_code}' -X POST \
     -F "admin_id=$ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
 BODY="$(echo "$RESP" | sed '$d')"
@@ -408,32 +416,60 @@ else
     fail "  Timestamps missing or inconsistent: $BODY"
 fi
 
-HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+# As for is-valid, a wrong admin_id must be indistinguishable from an unknown
+# drawing: a 403 here would confirm the drawing exists and undo the protection
+# is-valid provides, since both endpoints take the same admin_id.
+RESP=$(curl -s -w '\n%{http_code}' -X POST \
     -F "admin_id=$WRONG_ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
-assert_status "Reject wrong admin_id" 403 "$HTTP"
+MISMATCH_BODY="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
+assert_status "Wrong admin_id → 404 (not 403)" 404 "$HTTP"
 
-HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+RESP=$(curl -s -w '\n%{http_code}' -X POST \
     -F "admin_id=$ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/metadata")
+UNKNOWN_BODY="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
 assert_status "Metadata for non-existent drawing → 404" 404 "$HTTP"
 
-HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+if [[ "$MISMATCH_BODY" == "$UNKNOWN_BODY" ]]; then
+    pass "  Wrong admin_id and unknown drawing are indistinguishable"
+else
+    fail "  Responses differ: '$MISMATCH_BODY' vs '$UNKNOWN_BODY'"
+fi
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
 assert_status "Without admin_id form field → 422" 422 "$HTTP"
 
 # --- DELETE /api/wps/v1/drawings/{id} ---
 echo -e "\n${BOLD}=== DELETE /api/wps/v1/drawings/{id} ===${NC}"
 
-HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+RESP=$(curl -s -w '\n%{http_code}' -X DELETE \
     -F "admin_id=$WRONG_ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
-assert_status "Reject wrong admin_id" 403 "$HTTP"
+MISMATCH_BODY="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
+assert_status "Wrong admin_id → 404 (not 403)" 404 "$HTTP"
 
-HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+RESP=$(curl -s -w '\n%{http_code}' -X DELETE \
     -F "admin_id=$ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000")
+UNKNOWN_BODY="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
 assert_status "Delete non-existent drawing → 404" 404 "$HTTP"
+
+if [[ "$MISMATCH_BODY" == "$UNKNOWN_BODY" ]]; then
+    pass "  Wrong admin_id and unknown drawing are indistinguishable"
+else
+    fail "  Responses differ: '$MISMATCH_BODY' vs '$UNKNOWN_BODY'"
+fi
+
+# A rejected delete must not have deleted anything.
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
+assert_status "Drawing survives a rejected delete → 200" 200 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
@@ -448,13 +484,12 @@ HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 assert_status "Deleted drawing no longer retrievable → 404" 404 "$HTTP"
 
-RESP=$(curl -s -w '\n%{http_code}' -X PUT \
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
     -F "admin_id=$ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/is-valid")
-BODY="$(echo "$RESP" | sed '$d')"
-assert_json_field "  Deleted drawing no longer valid → is_valid=false" "$BODY" "is_valid" "False"
+assert_status "Deleted drawing no longer valid → 404" 404 "$HTTP"
 
-HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
     -F "admin_id=$ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
 assert_status "Deleted drawing has no metadata → 404" 404 "$HTTP"

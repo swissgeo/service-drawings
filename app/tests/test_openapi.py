@@ -122,7 +122,7 @@ def test_public_spec_has_put_error_responses(client: TestClient):
     spec = client.get("openapi.json").json()
 
     put_op = spec["paths"]["/api/wps/v1/drawings/{drawing_id}"]["put"]
-    for status in ("400", "403", "404"):
+    for status in ("400", "404"):
         assert status in put_op["responses"]
         schema = put_op["responses"][status]["content"]["application/json"]["schema"]
         assert "$ref" in schema
