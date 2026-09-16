@@ -1,8 +1,9 @@
 """WPS drawings API router.
 
-Provides REST endpoints for creating, retrieving, and updating KMZ drawing
-files stored in S3 and served through CloudFront. All routes are prefixed
-with /api/wps/v1 per SWISSGEO API standards.
+Provides REST endpoints for creating, retrieving, updating, and deleting KMZ
+drawing files stored in S3 and served through CloudFront, plus endpoints to
+check a drawing_id/admin_id pair and to read a drawing's metadata. All routes
+are prefixed with /api/wps/v1 per SWISSGEO API standards.
 """
 
 import uuid
@@ -13,7 +14,12 @@ from fastapi.responses import Response, StreamingResponse
 
 from app.core.drawings import DrawingsService, DrawingsServiceDep
 from app.core.s3 import CACHE_CONTROL_NO_STORE
-from app.schemas.drawings import DrawingsCreateResponse, DrawingsUpdateResponse
+from app.schemas.drawings import (
+    DrawingsCreateResponse,
+    DrawingsMetadataResponse,
+    DrawingsUpdateResponse,
+    DrawingsValidityResponse,
+)
 from app.schemas.errors import ErrorResponse
 from app.settings import get_settings
 
@@ -128,6 +134,50 @@ async def update_drawing(  # noqa: PLR0913, PLR0917
     timestamps.
     """
     return await drawings.update_drawing(drawing_id, admin_id, file, request, sha256)
+
+
+@router.put(
+    "/drawings/{drawing_id}/is-valid",
+    responses={
+        500: {"model": ErrorResponse},
+    },
+)
+async def is_valid_drawing(
+    drawing_id: uuid.UUID,
+    admin_id: AdminIdForm,
+    drawings: DrawingsServiceDep,
+) -> DrawingsValidityResponse:
+    """Check whether a drawing_id and admin_id combination is valid.
+
+    Always answers with 200 and a boolean: an unknown drawing_id and a
+    mismatched admin_id are reported identically, so the endpoint cannot be
+    used to discover which drawings exist. PUT is used rather than GET so the
+    admin_id stays in the request body instead of the URL.
+    """
+    return DrawingsValidityResponse(is_valid=await drawings.is_valid(drawing_id, admin_id))
+
+
+@router.put(
+    "/drawings/{drawing_id}/metadata",
+    responses={
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+async def get_drawing_metadata(
+    drawing_id: uuid.UUID,
+    admin_id: AdminIdForm,
+    drawings: DrawingsServiceDep,
+) -> DrawingsMetadataResponse:
+    """Retrieve a drawing's metadata without downloading its content.
+
+    Returns the filename used at the last upload and the creation/update
+    timestamps. The admin_id must match the stored drawing metadata, otherwise
+    the request is rejected with 403. PUT is used rather than GET so the
+    admin_id stays in the request body instead of the URL.
+    """
+    return await drawings.get_drawing_metadata(drawing_id, admin_id)
 
 
 @router.delete(

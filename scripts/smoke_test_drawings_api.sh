@@ -325,6 +325,72 @@ else
     fail "  Downloaded content does NOT match updated file"
 fi
 
+# --- PUT /api/wps/v1/drawings/{id}/is-valid ---
+echo -e "\n${BOLD}=== PUT /api/wps/v1/drawings/{id}/is-valid ===${NC}"
+
+RESP=$(curl -s -w '\n%{http_code}' -X PUT \
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/is-valid")
+BODY="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
+assert_status "Matching drawing_id/admin_id pair" 200 "$HTTP"
+assert_json_field "  body.is_valid=true" "$BODY" "is_valid" "True"
+
+# A wrong admin_id must answer 200/false, not 403: the check must not double as
+# an oracle telling an attacker which drawing identifiers exist.
+RESP=$(curl -s -w '\n%{http_code}' -X PUT \
+    -F "admin_id=$WRONG_ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/is-valid")
+BODY="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
+assert_status "Wrong admin_id → 200 (not 403)" 200 "$HTTP"
+assert_json_field "  body.is_valid=false" "$BODY" "is_valid" "False"
+
+RESP=$(curl -s -w '\n%{http_code}' -X PUT \
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/is-valid")
+BODY="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
+assert_status "Unknown drawing → 200 (not 404)" 200 "$HTTP"
+assert_json_field "  body.is_valid=false" "$BODY" "is_valid" "False"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/is-valid")
+assert_status "Without admin_id form field → 422" 422 "$HTTP"
+
+# --- PUT /api/wps/v1/drawings/{id}/metadata ---
+echo -e "\n${BOLD}=== PUT /api/wps/v1/drawings/{id}/metadata ===${NC}"
+
+RESP=$(curl -s -w '\n%{http_code}' -X PUT \
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
+BODY="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
+assert_status "Read metadata" 200 "$HTTP"
+assert_json_field "  body.id=$DRAWING_ID" "$BODY" "id" "$DRAWING_ID"
+# The last successful update uploaded valid2.kmz, so that is the recorded name.
+assert_json_field "  body.original_filename=valid2.kmz" "$BODY" "original_filename" "valid2.kmz"
+
+if echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['created_at'] and d['modified_at']; assert d['modified_at'] >= d['created_at']" 2>/dev/null; then
+    pass "  Timestamps present and modified_at >= created_at"
+else
+    fail "  Timestamps missing or inconsistent: $BODY"
+fi
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    -F "admin_id=$WRONG_ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
+assert_status "Reject wrong admin_id" 403 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/metadata")
+assert_status "Metadata for non-existent drawing → 404" 404 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
+assert_status "Without admin_id form field → 422" 422 "$HTTP"
+
 # --- DELETE /api/wps/v1/drawings/{id} ---
 echo -e "\n${BOLD}=== DELETE /api/wps/v1/drawings/{id} ===${NC}"
 
@@ -350,6 +416,17 @@ assert_status "Delete existing drawing → 204" 204 "$HTTP"
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 assert_status "Deleted drawing no longer retrievable → 404" 404 "$HTTP"
+
+RESP=$(curl -s -w '\n%{http_code}' -X PUT \
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/is-valid")
+BODY="$(echo "$RESP" | sed '$d')"
+assert_json_field "  Deleted drawing no longer valid → is_valid=false" "$BODY" "is_valid" "False"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
+assert_status "Deleted drawing has no metadata → 404" 404 "$HTTP"
 
 # --- OpenAPI spec ---
 echo -e "\n${BOLD}=== OpenAPI Spec ===${NC}"

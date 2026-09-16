@@ -7,7 +7,7 @@
 
 ## Description
 
-**Service Drawings** is an S3-only file store for KMZ drawing files. It exposes a small REST API to upload, download, update, and delete drawings, storing each file under a UUID4 key (`drawings/{uuid}.kmz`) in an S3 bucket.
+**Service Drawings** is an S3-only file store for KMZ drawing files. It exposes a small REST API to upload, download, update, delete, and inspect drawings, storing each file under a UUID4 key (`drawings/{uuid}.kmz`) in an S3 bucket.
 
 Built with **Python 3.14** / **FastAPI**, it is fully **async** (aioboto3) and uses **OpenTelemetry** for observability. There is **no database**, the S3 bucket is the single source of truth.
 
@@ -22,6 +22,8 @@ Built with **Python 3.14** / **FastAPI**, it is fully **async** (aioboto3) and u
     - [Download a drawing](#download-a-drawing)
     - [Update a drawing](#update-a-drawing)
     - [Delete a drawing](#delete-a-drawing)
+    - [Check a drawing_id / admin_id pair](#check-a-drawing_id--admin_id-pair)
+    - [Read a drawing's metadata](#read-a-drawings-metadata)
     - [Health checks (internal)](#health-checks-internal)
     - [OpenAPI documentation](#openapi-documentation)
     - [Error responses](#error-responses)
@@ -125,6 +127,55 @@ curl -sS -X DELETE \
 
 **Response** — `204 No Content` (empty body).
 
+### Check a drawing_id / admin_id pair
+
+`PUT /api/wps/v1/drawings/{drawing_id}/is-valid`
+
+Reports whether a `drawing_id` and `admin_id` combination identifies an existing drawing, without transferring the file. Useful for a client to confirm it still holds admin rights before offering an edit or delete action.
+
+The response is always `200`. An unknown `drawing_id` and a wrong `admin_id` are reported identically (`is_valid: false`), so the endpoint cannot be used to discover which drawings exist. `PUT` is used rather than `GET` so the `admin_id` travels in the request body instead of the URL, keeping it out of access logs and browser history.
+
+```bash
+curl -sS -X PUT \
+  -F "admin_id=b1a5c8e3-..." \
+  http://localhost:8000/api/wps/v1/drawings/f0c4d7a2-.../is-valid
+```
+
+**Response** — `200 OK`:
+
+```json
+{
+  "is_valid": true
+}
+```
+
+### Read a drawing's metadata
+
+`PUT /api/wps/v1/drawings/{drawing_id}/metadata`
+
+Returns a drawing's stored metadata without downloading its content: the filename the client used at the last upload, plus the creation and last-update timestamps. Requires the `admin_id`, otherwise the request is rejected with `403`. As above, `PUT` keeps the `admin_id` out of the URL.
+
+```bash
+curl -sS -X PUT \
+  -F "admin_id=b1a5c8e3-..." \
+  http://localhost:8000/api/wps/v1/drawings/f0c4d7a2-.../metadata
+```
+
+**Response** — `200 OK`:
+
+```json
+{
+  "id": "f0c4d7a2-...",
+  "original_filename": "France.kmz",
+  "created_at": "2026-01-01T12:00:00+00:00",
+  "modified_at": "2026-01-02T09:30:00+00:00"
+}
+```
+
+`original_filename` is the basename of what the client sent: any directory component is stripped, and a name that is purely path syntax falls back to `{drawing_id}.kmz`. Non-ASCII names are preserved (they are percent-encoded in S3 metadata, which must be ASCII, and decoded on read). It is `null` for drawings uploaded before the service started recording filenames.
+
+Note that the unchanged-content short-circuit on `PUT /drawings/{drawing_id}` skips the S3 write entirely, so re-uploading identical bytes under a new name leaves `original_filename` unchanged.
+
 ### Health checks (internal)
 
 `GET /checker` and `GET /checker/ready`
@@ -202,7 +253,7 @@ Two standalone smoke tests live in `scripts/`. They validate the service without
 
 ### `scripts/smoke_test_drawings_api.sh`
 
-End-to-end API smoke test. It generates sample KMZ files, starts a dev server, and exercises the full HTTP surface of the API: health endpoints, upload (valid/invalid/oversized), download (content-type + byte-for-byte match), update (wrong `admin_id`, missing drawing, unchanged content short-circuit), delete (including the `422` when `admin_id` is missing), and OpenAPI spec exposure.
+End-to-end API smoke test. It generates sample KMZ files, starts a dev server, and exercises the full HTTP surface of the API: health endpoints, upload (valid/invalid/oversized), download (content-type + byte-for-byte match), update (wrong `admin_id`, missing drawing, unchanged content short-circuit), `is-valid` (matching pair, wrong `admin_id`, unknown drawing), `metadata` (filename + timestamps, wrong `admin_id`, missing drawing), delete (including the `422` when `admin_id` is missing, and that both `is-valid` and `metadata` stop answering afterwards), and OpenAPI spec exposure.
 
 ```bash
 make start-moto                                  # required: local S3 emulator
