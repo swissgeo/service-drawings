@@ -81,6 +81,23 @@ assert_content_type() {
     fi
 }
 
+assert_header() {
+    local desc="$1" url="$2" header="$3" expected="$4"
+    local actual
+    # Header names are case-insensitive, and the trailing CR of the status line
+    # would otherwise end up inside the compared value.
+    actual="$(curl -s -o /dev/null -D - "$url" \
+        | tr -d '\r' \
+        | grep -i "^${header}:" \
+        | head -n 1 \
+        | cut -d' ' -f2-)"
+    if [[ "$actual" == "$expected" ]]; then
+        pass "$desc"
+    else
+        fail "$desc — expected '$expected', got '$actual'"
+    fi
+}
+
 # -------------------------------------------------------------------
 # Load environment
 # -------------------------------------------------------------------
@@ -263,6 +280,14 @@ assert_content_type \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID" \
     "application/vnd.google-earth.kmz"
 
+# The name the file was uploaded under, so the browser saves it as valid.kmz
+# rather than as the drawing UUID.
+assert_header \
+    "  Content-Disposition carries the original filename" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID" \
+    "content-disposition" \
+    "attachment; filename=\"valid.kmz\"; filename*=UTF-8''valid.kmz"
+
 if cmp -s "$TMPDIR/valid.kmz" "$TMPDIR/downloaded.kmz"; then
     pass "  Downloaded content matches original"
 else
@@ -324,6 +349,12 @@ if cmp -s "$TMPDIR/valid2.kmz" "$TMPDIR/downloaded2.kmz"; then
 else
     fail "  Downloaded content does NOT match updated file"
 fi
+
+assert_header \
+    "  Content-Disposition follows the updated filename" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID" \
+    "content-disposition" \
+    "attachment; filename=\"valid2.kmz\"; filename*=UTF-8''valid2.kmz"
 
 # --- PUT /api/wps/v1/drawings/{id}/is-valid ---
 echo -e "\n${BOLD}=== PUT /api/wps/v1/drawings/{id}/is-valid ===${NC}"

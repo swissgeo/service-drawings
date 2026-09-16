@@ -127,7 +127,9 @@ def test_get_drawing_existing(client: TestClient, valid_kmz_bytes: bytes):
     response = client.get(f"/api/wps/v1/drawings/{drawing_id}")
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/vnd.google-earth.kmz"
-    assert "attachment" in response.headers["content-disposition"]
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"test.kmz\"; filename*=UTF-8''test.kmz"
+    )
     assert response.headers["cache-control"] == "no-store, max-age=0"
     assert response.content == valid_kmz_bytes
 
@@ -661,3 +663,98 @@ def test_metadata_path_only_filename_falls_back(
     )
     assert response.status_code == 200
     assert response.json()["original_filename"] == f"{drawing_id}.kmz"
+
+
+def test_get_drawing_content_disposition_uses_original_filename(
+    client: TestClient, valid_kmz_bytes: bytes
+):
+    """GET offers the download under the name the client uploaded it with."""
+    drawing_id, _ = _create(client, valid_kmz_bytes, filename="France.kmz")
+
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"France.kmz\"; filename*=UTF-8''France.kmz"
+    )
+
+
+def test_get_drawing_content_disposition_unicode_filename(
+    client: TestClient, valid_kmz_bytes: bytes
+):
+    """A non-ASCII name is carried exactly in filename* and degraded in filename.
+
+    The bare filename parameter cannot hold non-ASCII, so it only serves clients
+    that ignore filename*; those characters are replaced rather than dropped so
+    the fallback stays a plausible filename.
+    """
+    drawing_id, _ = _create(client, valid_kmz_bytes, filename="Zürich.kmz")
+
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"Z_rich.kmz\"; filename*=UTF-8''Z%C3%BCrich.kmz"
+    )
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ('ev"il.kmz', "attachment; filename=\"ev_il.kmz\"; filename*=UTF-8''ev%22il.kmz"),
+        (
+            r"back\slash.kmz",
+            "attachment; filename=\"back_slash.kmz\"; filename*=UTF-8''back%5Cslash.kmz",
+        ),
+        (
+            "new\nline.kmz",
+            "attachment; filename=\"new_line.kmz\"; filename*=UTF-8''new%0Aline.kmz",
+        ),
+    ],
+)
+def test_build_content_disposition_neutralises_header_breakers(filename: str, expected: str):
+    """Quotes, backslashes and control characters cannot break out of the header.
+
+    This is tested directly rather than through an upload because the multipart
+    layer percent-encodes such characters before the service ever sees them; the
+    guarantee has to hold for whatever reaches the service.
+    """
+    assert DrawingsService.build_content_disposition(filename) == expected
+
+
+def test_get_drawing_content_disposition_after_update(client: TestClient, valid_kmz_bytes: bytes):
+    """The download name follows the filename of the most recent update."""
+    drawing_id, admin_id = _create(client, valid_kmz_bytes, filename="before.kmz")
+
+    new_content = _build_kmz("<kml><Document><Placemark/></Document></kml>")
+    update_resp = client.put(
+        f"/api/wps/v1/drawings/{drawing_id}",
+        files={"file": ("after.kmz", new_content, "application/vnd.google-earth.kmz")},
+        data={"admin_id": admin_id, "sha256": _sha256(new_content)},
+    )
+    assert update_resp.status_code == 200
+
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}")
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"after.kmz\"; filename*=UTF-8''after.kmz"
+    )
+
+
+def test_get_drawing_content_disposition_legacy_object(client: TestClient, settings, s3_client):
+    """A drawing stored before filenames were recorded downloads as {drawing_id}.kmz."""
+    drawing_id = uuid.uuid4()
+    s3_client.put_object(
+        Bucket=settings.aws_s3_bucket_name,
+        Key=f"drawings/{drawing_id}.kmz",
+        Body=b"PK\x03\x04",
+        Metadata={
+            "sha256": "0" * 64,
+            "admin-id": str(uuid.uuid4()),
+            "created-at": "2026-01-01T12:00:00+00:00",
+            "modified-at": "2026-01-01T12:00:00+00:00",
+        },
+    )
+
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        f"attachment; filename=\"{drawing_id}.kmz\"; filename*=UTF-8''{drawing_id}.kmz"
+    )

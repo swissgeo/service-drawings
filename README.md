@@ -76,14 +76,22 @@ The `admin_id` is the secret token required to update or delete the drawing. Kee
 
 `GET /api/wps/v1/drawings/{drawing_id}`
 
-Streams the KMZ file from S3 as an attachment download.
+Streams the KMZ file from S3 as an attachment download, under the filename recorded at the last upload.
 
 ```bash
 curl -sS -o drawing.kmz \
   http://localhost:8000/api/wps/v1/drawings/f0c4d7a2-...
 ```
 
-**Response** — `200 OK` with `Content-Type: application/vnd.google-earth.kmz` and `Content-Disposition: attachment; filename="{drawing_id}.kmz"`.
+**Response** — `200 OK` with `Content-Type: application/vnd.google-earth.kmz` and a `Content-Disposition` naming the file as it was uploaded, so browsers save it under its original name:
+
+```
+Content-Disposition: attachment; filename="Zurich.kmz"; filename*=UTF-8''Z%C3%BCrich.kmz
+```
+
+The name is carried twice, per [RFC 6266](https://datatracker.ietf.org/doc/html/rfc6266): `filename*` holds the exact UTF-8 name and is what every current browser uses, while the bare `filename` is an ASCII-only fallback in which non-ASCII characters, quotes and control characters are replaced by `_`. Drawings uploaded before the service started recording filenames fall back to `{drawing_id}.kmz`.
+
+Because the name comes from the *last* upload, and `PUT` skips the S3 write when the content is unchanged, re-uploading identical bytes under a new name leaves the download name as it was.
 
 ### Update a drawing
 
@@ -253,7 +261,7 @@ Two standalone smoke tests live in `scripts/`. They validate the service without
 
 ### `scripts/smoke_test_drawings_api.sh`
 
-End-to-end API smoke test. It generates sample KMZ files, starts a dev server, and exercises the full HTTP surface of the API: health endpoints, upload (valid/invalid/oversized), download (content-type + byte-for-byte match), update (wrong `admin_id`, missing drawing, unchanged content short-circuit), `is-valid` (matching pair, wrong `admin_id`, unknown drawing), `metadata` (filename + timestamps, wrong `admin_id`, missing drawing), delete (including the `422` when `admin_id` is missing, and that both `is-valid` and `metadata` stop answering afterwards), and OpenAPI spec exposure.
+End-to-end API smoke test. It generates sample KMZ files, starts a dev server, and exercises the full HTTP surface of the API: health endpoints, upload (valid/invalid/oversized), download (content-type, `Content-Disposition` filename, byte-for-byte match), update (wrong `admin_id`, missing drawing, unchanged content short-circuit), `is-valid` (matching pair, wrong `admin_id`, unknown drawing), `metadata` (filename + timestamps, wrong `admin_id`, missing drawing), delete (including the `422` when `admin_id` is missing, and that both `is-valid` and `metadata` stop answering afterwards), and OpenAPI spec exposure.
 
 ```bash
 make start-moto                                  # required: local S3 emulator

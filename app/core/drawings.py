@@ -97,6 +97,32 @@ class DrawingsService:
         """
         return unquote(value) if value else None
 
+    @staticmethod
+    def build_content_disposition(filename: str) -> str:
+        """Build the attachment Content-Disposition header for a download filename.
+
+        RFC 6266 carries the name twice: a bare "filename" restricted to
+        printable US-ASCII, and a "filename*" holding the exact UTF-8 name.
+        Clients that understand "filename*" use it and ignore the other, so the
+        ASCII form is only a fallback and may safely lose characters.
+
+        Args:
+            filename: The name the browser should save the file under.
+
+        Returns:
+            The full header value, e.g.
+            `attachment; filename="Z_rich.kmz"; filename*=UTF-8''Z%C3%BCrich.kmz`.
+
+        """
+        # A quote or backslash would terminate or escape the quoted-string, and
+        # non-ASCII characters cannot appear in it at all, so the fallback keeps
+        # only what a client can read back verbatim.
+        ascii_name = "".join(
+            c if c.isascii() and c.isprintable() and c not in '"\\' else "_" for c in filename
+        )
+        ext_value = "UTF-8''" + quote(filename, safe="")
+        return f'attachment; filename="{ascii_name}"; filename*={ext_value}'
+
     async def _validate_digest(self, file: UploadFile, sha256: str) -> int:
         """Compute the file digest, verify it against the client value, and return its size.
 
@@ -311,16 +337,19 @@ class DrawingsService:
         )
 
     async def get_drawing(self, drawing_id: uuid.UUID) -> tuple[AsyncIterator[bytes], str]:
-        """Verify existence and return a stream for the KMZ drawing.
+        """Verify existence and return a stream and download name for the KMZ drawing.
 
         Performs a head request first so that DrawingNotFoundError is raised
-        before the response stream starts.
+        before the response stream starts, which also yields the filename
+        recorded at the last upload without a second S3 call.
 
         Args:
             drawing_id: The UUID of the drawing to retrieve.
 
         Returns:
-            A tuple of (async byte iterator, s3_key).
+            A tuple of (async byte iterator, download filename). The filename is
+            the one the client used at the last upload, falling back to
+            "{drawing_id}.kmz" for drawings stored before it was recorded.
 
         Raises:
             DrawingNotFoundError: If no drawing exists with the given identifier.
@@ -331,9 +360,10 @@ class DrawingsService:
 
         # Verify the drawing exists before streaming, so that DrawingNotFoundError
         # is raised before the response starts and can be caught by the exception handler.
-        await self._s3.head_drawing(s3_key)
+        existing = await self._s3.head_drawing(s3_key)
+        filename = self.decode_filename(existing.get("original-filename")) or f"{drawing_id}.kmz"
 
-        return self._s3.get_drawing(s3_key), s3_key
+        return self._s3.get_drawing(s3_key), filename
 
     async def is_valid(self, drawing_id: uuid.UUID, admin_id: uuid.UUID) -> bool:
         """Report whether a drawing_id/admin_id pair identifies an existing drawing.

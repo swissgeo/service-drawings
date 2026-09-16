@@ -93,14 +93,17 @@ async def get_drawing(
 
     Streams the KMZ binary content directly from S3 with the appropriate
     Content-Type and Content-Disposition headers for an attachment download.
+    The download filename is the one the client used at the last upload, so
+    browsers save the drawing under its original name; drawings stored before
+    that name was recorded fall back to "{drawing_id}.kmz".
     """
-    stream, _ = await drawings.get_drawing(drawing_id)
+    stream, filename = await drawings.get_drawing(drawing_id)
 
     return StreamingResponse(
         stream,
         media_type=DrawingsService.KMZ_CONTENT_TYPE,
         headers={
-            "Content-Disposition": f'attachment; filename="{drawing_id}.kmz"',
+            "Content-Disposition": DrawingsService.build_content_disposition(filename),
             "Cache-Control": CACHE_CONTROL_NO_STORE,
         },
     )
