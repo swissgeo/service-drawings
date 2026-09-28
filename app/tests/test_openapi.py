@@ -12,6 +12,18 @@ def test_get_openapi_json(client: TestClient):
     assert response.headers["content-type"].startswith("application/json")
 
 
+def test_get_openapi_json_under_drawings_prefix(client: TestClient):
+    """The public spec is also served under the drawings API prefix, identically."""
+    response = client.get("/api/wps/v1/drawings/openapi.json")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.content == client.get("openapi.json").content
+    assert "/checker" not in response.json()["paths"]
+    # Not listed as an operation of its own in the spec
+    assert "/api/wps/v1/drawings/openapi.json" not in response.json()["paths"]
+
+
 def test_get_openapi_doc(client: TestClient):
     response = client.get("docs")
 

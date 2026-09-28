@@ -497,6 +497,17 @@ else
     fail "  /checker incorrectly exposed in public spec"
 fi
 
+RESP=$(curl -s -w '\n%{http_code}' "$BASE_URL/api/wps/v1/drawings/openapi.json")
+PREFIXED_SPEC="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
+assert_status "GET /api/wps/v1/drawings/openapi.json" 200 "$HTTP"
+
+if [[ "$PREFIXED_SPEC" == "$(curl -s "$BASE_URL/openapi.json")" ]]; then
+    pass "  Identical to /openapi.json"
+else
+    fail "  Differs from /openapi.json"
+fi
+
 # ===================================================================
 # Summary
 # ===================================================================

@@ -217,6 +217,7 @@ curl -sS http://localhost:8000/checker/ready
 Available when `PUBLISH_OPENAPI_SPEC=1` (set in `.env.default`):
 
 - `GET /openapi.json` — public spec (drawings API only)
+- `GET /api/wps/v1/drawings/openapi.json` — the same public spec, under the drawings API prefix
 - `GET /internal/openapi.json` — internal spec (health routes only)
 - `GET /internal/docs`, `GET /internal/redoc` — internal Swagger UI / ReDoc
 - `GET /docs`, `GET /redoc` — public Swagger UI / ReDoc

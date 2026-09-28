@@ -2,7 +2,8 @@
 
 Produces two separate OpenAPI schemas: a public one excluding Internal-tagged
 routes and an internal one containing only those routes. Registers dedicated
-Swagger UI and ReDoc endpoints for the internal spec. Strips 422 responses
+Swagger UI and ReDoc endpoints for the internal spec, and serves the public
+spec a second time under the drawings API prefix. Strips 422 responses
 replaced by app-level 400 exception handlers.
 """
 
@@ -13,7 +14,7 @@ from typing import Any
 from fastapi import FastAPI, Response, routing
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.routing import APIRoute
 
 from app.api.internal import INTERNAL_TAG
@@ -22,6 +23,9 @@ from app.settings import get_settings
 _INTERNAL_SPEC_PREFIX = "internal"
 _INTERNAL_SPEC_URL = f"/{_INTERNAL_SPEC_PREFIX}/openapi.json"
 _SPEC_URL = "/openapi.json"
+# The public spec is also served next to the drawings routes, so clients that
+# only reach the service through the API prefix can still fetch it.
+_DRAWINGS_SPEC_URL = f"{get_settings().api_prefix}/drawings/openapi.json"
 
 
 def _iter_routes(app: FastAPI) -> list[Any]:
@@ -95,7 +99,8 @@ def _build_internal_schema(app: FastAPI) -> dict[str, Any]:
 def setup_openapi(app: FastAPI) -> None:
     """Configure split OpenAPI specs and register internal doc endpoints.
 
-    The default spec (/docs, /openapi.json) excludes Internal-tagged routes.
+    The default spec (/docs, /openapi.json) excludes Internal-tagged routes;
+    it is also served under /api/wps/v1/drawings/openapi.json.
     The internal spec (/internal/openapi.json, /internal/docs, /internal/redoc)
     contains only Internal-tagged routes.
 
@@ -117,6 +122,13 @@ def setup_openapi(app: FastAPI) -> None:
         return _internal_schema
 
     app.openapi = custom_openapi  # ty:ignore[invalid-assignment]
+
+    # Registered before the drawings router is included, so it takes precedence
+    # over GET /drawings/{drawing_id}, which would otherwise answer 422.
+    @app.get(_DRAWINGS_SPEC_URL, include_in_schema=False)
+    async def drawings_openapi_schema() -> JSONResponse:
+        # JSONResponse, as FastAPI uses for /openapi.json, so both are byte-identical
+        return JSONResponse(app.openapi())
 
     @app.get(_INTERNAL_SPEC_URL, include_in_schema=False)
     async def internal_openapi_schema() -> Response:
