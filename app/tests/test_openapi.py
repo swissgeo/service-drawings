@@ -150,6 +150,31 @@ def test_public_spec_has_get_error_responses(client: TestClient):
         assert "$ref" in schema
 
 
+def test_public_spec_declares_admin_id_bearer_scheme(client: TestClient):
+    """Verify routes taking an admin_id declare the bearer scheme and its error responses."""
+    spec = client.get("openapi.json").json()
+
+    scheme = spec["components"]["securitySchemes"]["AdminId"]
+    assert scheme["type"] == "http"
+    assert scheme["scheme"] == "bearer"
+
+    paths = spec["paths"]
+    protected = [
+        paths["/api/wps/v1/drawings/{drawing_id}"]["put"],
+        paths["/api/wps/v1/drawings/{drawing_id}"]["delete"],
+        paths["/api/wps/v1/drawings/{drawing_id}/check-auth"]["get"],
+        paths["/api/wps/v1/drawings/{drawing_id}/metadata"]["get"],
+    ]
+    for op in protected:
+        assert op["security"] == [{"AdminId": []}]
+        for status in ("401", "403", "404"):
+            assert status in op["responses"]
+
+    # Creating and downloading a drawing need no admin_id
+    assert "security" not in paths["/api/wps/v1/drawings"]["post"]
+    assert "security" not in paths["/api/wps/v1/drawings/{drawing_id}"]["get"]
+
+
 def test_public_spec_includes_drawings_tag(client: TestClient):
     """Verify the public OpenAPI spec declares the Drawings tag."""
     spec = client.get("openapi.json").json()

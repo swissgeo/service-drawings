@@ -26,6 +26,7 @@ from app.core.exceptions import (
     DigestMismatchError,
     DrawingNotFoundError,
     InvalidKMZError,
+    MissingCredentialsError,
     S3Error,
 )
 from app.middlewares.body_size import MaxBodySizeMiddleware
@@ -112,6 +113,22 @@ async def invalid_kmz_handler(_request: Request, exc: InvalidKMZError) -> JSONRe
 async def digest_mismatch_handler(_request: Request, exc: DigestMismatchError) -> JSONResponse:
     """Handle SHA-256 digest mismatch errors with a 400 Bad Request response."""
     return JSONResponse(status_code=400, content={"detail": exc.message})
+
+
+@app.exception_handler(MissingCredentialsError)
+async def missing_credentials_handler(
+    _request: Request, exc: MissingCredentialsError
+) -> JSONResponse:
+    """Handle missing or malformed credentials with a 401 Unauthorized response.
+
+    RFC 9110 requires a 401 to carry a WWW-Authenticate challenge naming the
+    scheme the client should use.
+    """
+    return JSONResponse(
+        status_code=401,
+        content={"detail": exc.message},
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 @app.exception_handler(AdminIdMismatchError)
