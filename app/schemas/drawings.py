@@ -2,8 +2,8 @@
 
 Defines the response schemas returned after successful KMZ drawing creation
 and update, containing the drawing identifier, admin identifier, S3 URL, and
-timestamps, as well as the schema for the metadata lookup. The validity check
-answers with a bare status code and so has no schema.
+timestamps, as well as the schema for the metadata lookup. The check-auth
+endpoint answers with a bare status code and so has no schema.
 """
 
 from datetime import datetime
@@ -60,7 +60,10 @@ class DrawingsMetadataResponse(BaseModel):
 
     """
 
-    id: UUID
+    id: UUID = Field(
+        description="Unique drawing identifier",
+        examples=["f0c4d7a2-9b1e-4c3d-8a5f-2e6b7c8d9e0f"],
+    )
     original_filename: str | None = Field(
         default=None,
         description=("Name of the uploaded file as provided by the client, or null when unknown"),

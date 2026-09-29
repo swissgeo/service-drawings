@@ -402,11 +402,26 @@ assert_header \
     "www-authenticate" \
     "Bearer"
 
+# The answer depends on the Authorization header, so no cache may replay it.
+assert_header \
+    "  401 is marked Cache-Control: no-store" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth" \
+    "cache-control" \
+    "no-store, max-age=0"
+
+if curl -s -o /dev/null -D - -H "Authorization: Bearer $ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth" \
+    | tr -d '\r' | grep -qi '^cache-control: no-store, max-age=0$'; then
+    pass "  204 is marked Cache-Control: no-store"
+else
+    fail "  204 is missing Cache-Control: no-store"
+fi
+
 # --- GET /api/wps/v1/drawings/{id}/metadata ---
 echo -e "\n${BOLD}=== GET /api/wps/v1/drawings/{id}/metadata ===${NC}"
 
+# Public, like the download: no Authorization header needed.
 RESP=$(curl -s -w '\n%{http_code}' \
-    -H "Authorization: Bearer $ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
 BODY="$(echo "$RESP" | sed '$d')"
 HTTP="$(echo "$RESP" | tail -n 1)"
@@ -421,19 +436,15 @@ else
     fail "  Timestamps missing or inconsistent: $BODY"
 fi
 
-HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer $WRONG_ADMIN_ID" \
-    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
-assert_status "Wrong admin_id → 403" 403 "$HTTP"
+assert_header \
+    "  Cache-Control: no-store" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata" \
+    "cache-control" \
+    "no-store, max-age=0"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer $ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/metadata")
 assert_status "Metadata for non-existent drawing → 404" 404 "$HTTP"
-
-HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
-    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
-assert_status "Without Authorization header → 401" 401 "$HTTP"
 
 # --- DELETE /api/wps/v1/drawings/{id} ---
 echo -e "\n${BOLD}=== DELETE /api/wps/v1/drawings/{id} ===${NC}"
@@ -474,7 +485,6 @@ HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
 assert_status "check-auth on deleted drawing → 404" 404 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer $ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
 assert_status "Deleted drawing has no metadata → 404" 404 "$HTTP"
 

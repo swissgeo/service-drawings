@@ -36,8 +36,8 @@ class S3Service:
             key: S3 object key (e.g. "drawings/{uuid}.kmz")
             fileobj: Open seekable binary file object to upload
             content_type: MIME type (application/vnd.google-earth.kmz)
-            metadata: Dict of S3 metadata (sha256, admin_id, created_at,
-                modified_at)
+            metadata: Dict of S3 metadata (sha256, admin-id,
+                original-filename, created-at, modified-at)
 
         Raises:
             S3Error: If the S3 upload fails
@@ -80,9 +80,6 @@ class S3Service:
             error_code = e.response["Error"]["Code"]
             status_code = e.response["ResponseMetadata"]["HTTPStatusCode"]
             if error_code == "NoSuchKey" or status_code == HTTPStatus.NOT_FOUND:
-                # The key is logged, not returned: the message reaches the client
-                # verbatim, and a body that varies with the key would let a caller
-                # tell a missing drawing from one whose admin_id simply did not match.
                 logger.info("Drawing not found for key %s", key)
                 raise DrawingNotFoundError from e
             logger.exception("S3 read failed for key %s", key)
@@ -115,9 +112,6 @@ class S3Service:
             error_code = e.response["Error"]["Code"]
             status_code = e.response["ResponseMetadata"]["HTTPStatusCode"]
             if error_code == "NoSuchKey" or status_code == HTTPStatus.NOT_FOUND:
-                # The key is logged, not returned: the message reaches the client
-                # verbatim, and a body that varies with the key would let a caller
-                # tell a missing drawing from one whose admin_id simply did not match.
                 logger.info("Drawing not found for key %s", key)
                 raise DrawingNotFoundError from e
             logger.exception("S3 head failed for key %s", key)

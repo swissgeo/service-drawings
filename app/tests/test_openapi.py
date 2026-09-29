@@ -175,16 +175,22 @@ def test_public_spec_declares_admin_id_bearer_scheme(client: TestClient):
         paths["/api/wps/v1/drawings/{drawing_id}"]["put"],
         paths["/api/wps/v1/drawings/{drawing_id}"]["delete"],
         paths["/api/wps/v1/drawings/{drawing_id}/check-auth"]["get"],
-        paths["/api/wps/v1/drawings/{drawing_id}/metadata"]["get"],
     ]
     for op in protected:
         assert op["security"] == [{"AdminId": []}]
         for status in ("401", "403", "404"):
             assert status in op["responses"]
 
-    # Creating and downloading a drawing need no admin_id
-    assert "security" not in paths["/api/wps/v1/drawings"]["post"]
-    assert "security" not in paths["/api/wps/v1/drawings/{drawing_id}"]["get"]
+    # Creating a drawing, downloading it and reading its metadata need no admin_id
+    public = [
+        paths["/api/wps/v1/drawings"]["post"],
+        paths["/api/wps/v1/drawings/{drawing_id}"]["get"],
+        paths["/api/wps/v1/drawings/{drawing_id}/metadata"]["get"],
+    ]
+    for op in public:
+        assert "security" not in op
+        assert "401" not in op["responses"]
+        assert "403" not in op["responses"]
 
 
 def test_public_spec_includes_drawings_tag(client: TestClient):

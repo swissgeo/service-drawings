@@ -78,7 +78,7 @@ Every endpoint that needs it takes it as a bearer token in the `Authorization` h
 Authorization: Bearer b1a5c8e3-...
 ```
 
-On those endpoints a missing or malformed header (absent, another scheme, or a token that is not a UUID) answers `401` with `WWW-Authenticate: Bearer`, an unknown `drawing_id` answers `404`, and a wrong `admin_id` for an existing drawing answers `403`.
+On those endpoints (`PUT` and `DELETE` on a drawing, and `check-auth`) a missing or malformed header (absent, another scheme, or a token that is not a UUID) answers `401` with `WWW-Authenticate: Bearer`, an unknown `drawing_id` answers `404`, and a wrong `admin_id` for an existing drawing answers `403`.
 
 ### Download a drawing
 
@@ -156,6 +156,8 @@ Reports whether the `admin_id` sent as a bearer token grants write access to the
 | `403 Forbidden` | The drawing exists but the `admin_id` does not match |
 | `404 Not Found` | The drawing does not exist |
 
+Every answer that depends on the `Authorization` header (`204`, `401`, `403`) carries `Cache-Control: no-store`, so a cache in front of the service can never replay one caller's answer to another.
+
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' \
   -H "Authorization: Bearer b1a5c8e3-..." \
@@ -166,12 +168,10 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 `GET /api/wps/v1/drawings/{drawing_id}/metadata`
 
-Returns a drawing's stored metadata without downloading its content: the filename the client used at the last upload, plus the creation and last-update timestamps. Requires the `admin_id` as a bearer token; a wrong one is rejected with `403`.
+Returns a drawing's stored metadata without downloading its content: the filename the client used at the last upload, plus the creation and last-update timestamps. It needs no `admin_id`: the filename is already public through the download's `Content-Disposition`, and this lets a client show a drawing's details in read-only mode too. The response carries `Cache-Control: no-store`, since an update changes it.
 
 ```bash
-curl -sS \
-  -H "Authorization: Bearer b1a5c8e3-..." \
-  http://localhost:8000/api/wps/v1/drawings/f0c4d7a2-.../metadata
+curl -sS http://localhost:8000/api/wps/v1/drawings/f0c4d7a2-.../metadata
 ```
 
 **Response** — `200 OK`:
@@ -185,7 +185,7 @@ curl -sS \
 }
 ```
 
-`original_filename` is the basename of what the client sent: any directory component is stripped, and a name that is purely path syntax falls back to `{drawing_id}.kmz`. Non-ASCII names are preserved (they are percent-encoded in S3 metadata, which must be ASCII, and decoded on read). It is `null` for drawings uploaded before the service started recording filenames.
+`original_filename` is the basename of what the client sent: any directory component is stripped, and a name that is purely path syntax falls back to `{drawing_id}.kmz`. Non-ASCII names are preserved (they are percent-encoded in S3 metadata, which must be ASCII, and decoded on read). S3 caps user metadata at 2 KB, so an over-long name is shortened until its percent-encoded form fits in 1,024 characters; the cut happens before the extension, so `….kmz` stays `….kmz`. It is `null` for drawings uploaded before the service started recording filenames.
 
 Note that the unchanged-content short-circuit on `PUT /drawings/{drawing_id}` skips the S3 write entirely, so re-uploading identical bytes under a new name leaves `original_filename` unchanged.
 
@@ -230,7 +230,7 @@ Application errors follow a uniform `{"detail": "<message>"}` body. The `422` st
 |--------|---------|
 | `400` | Invalid KMZ file (not a valid zip) or SHA-256 digest mismatch |
 | `401` | Missing or malformed `Authorization: Bearer <admin_id>` header (carries `WWW-Authenticate: Bearer`) |
-| `403` | `admin_id` does not match the stored drawing metadata |
+| `403` | `admin_id` does not match the stored drawing metadata (on `PUT`, `DELETE` and `check-auth`) |
 | `404` | Drawing not found |
 | `413` | Uploaded body exceeds the maximum size (5 MB by default, configurable via `MAX_UPLOAD_SIZE_BYTES`) |
 | `422` | Request validation error (e.g. missing `sha256` form field) |
@@ -268,7 +268,7 @@ Two standalone smoke tests live in `scripts/`. They validate the service without
 
 ### `scripts/smoke_test_drawings_api.sh`
 
-End-to-end API smoke test. It generates sample KMZ files, starts a dev server, and exercises the full HTTP surface of the API: health endpoints, upload (valid/invalid/oversized), download (content-type, `Content-Disposition` filename, byte-for-byte match), update (wrong `admin_id` → 403, missing `Authorization` → 401, missing drawing, unchanged content short-circuit), `check-auth` (matching pair → 204, wrong `admin_id` → 403, unknown drawing → 404, missing or non-UUID token → 401 with a `Bearer` challenge), `metadata` (filename + timestamps, 403/404/401), delete (403/404, that an `admin_id` sent as a form field is no longer honoured, that rejected deletes leave the drawing intact, and that both `check-auth` and `metadata` answer 404 afterwards), and OpenAPI spec exposure.
+End-to-end API smoke test. It generates sample KMZ files, starts a dev server, and exercises the full HTTP surface of the API: health endpoints, upload (valid/invalid/oversized), download (content-type, `Content-Disposition` filename, byte-for-byte match), update (wrong `admin_id` → 403, missing `Authorization` → 401, missing drawing, unchanged content short-circuit), `check-auth` (matching pair → 204, wrong `admin_id` → 403, unknown drawing → 404, missing or non-UUID token → 401 with a `Bearer` challenge, `no-store` on auth-dependent answers), `metadata` (filename + timestamps without any `Authorization` header, `no-store`, 404), delete (403/404, that an `admin_id` sent as a form field is no longer honoured, that rejected deletes leave the drawing intact, and that both `check-auth` and `metadata` answer 404 afterwards), and OpenAPI spec exposure.
 
 ```bash
 make start-moto                                  # required: local S3 emulator

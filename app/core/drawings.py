@@ -4,8 +4,10 @@ import hashlib
 import hmac
 import logging
 import uuid
+from bisect import bisect_right
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from itertools import accumulate
 from pathlib import PureWindowsPath
 from typing import Annotated
 from urllib.parse import quote, unquote
@@ -34,9 +36,13 @@ class DrawingsService:
 
     S3_KEY_PREFIX = "drawings"
     KMZ_CONTENT_TYPE = "application/vnd.google-earth.kmz"
-    # S3 caps user metadata at 2 KB in total, and percent-encoding can triple the
-    # length of a non-ASCII name, so the raw name is capped well below that.
-    MAX_FILENAME_LENGTH = 255
+    # S3 caps user metadata at 2 KB across all keys and values. The other entries
+    # take about 220 bytes, so the encoded name gets 1 KB, leaving ample headroom.
+    # The cap applies after encoding because percent-encoding turns each non-ASCII
+    # UTF-8 byte into three characters: 255 emoji would encode to over 3 KB.
+    MAX_ENCODED_FILENAME_LENGTH = 1024
+    # An extension longer than this is not a real one and is truncated with the rest.
+    MAX_ENCODED_EXTENSION_LENGTH = 32
 
     def __init__(self, s3: S3Service) -> None:
         self._s3 = s3
@@ -89,9 +95,11 @@ class DrawingsService:
                 when the client sends no usable filename.
 
         Returns:
-            The percent-encoded basename, or the percent-encoded fallback
-            "{drawing_id}.kmz" when the client sent no filename or one that is
-            purely path syntax.
+            The percent-encoded basename, at most MAX_ENCODED_FILENAME_LENGTH
+            characters long, or the percent-encoded fallback "{drawing_id}.kmz"
+            when the client sent no filename or one that is purely path syntax.
+            An over-long name is shortened before its extension, so "….kmz"
+            stays "….kmz".
 
         """
         # PureWindowsPath treats both forward and backward slashes as separators, so a
@@ -100,7 +108,21 @@ class DrawingsService:
         # A name that is purely path syntax ("/", "..") leaves nothing usable behind.
         if name in {"", ".", ".."}:
             name = f"{drawing_id}.kmz"
-        return quote(name[: DrawingsService.MAX_FILENAME_LENGTH], safe="")
+
+        encoded = quote(name, safe="")
+        if len(encoded) <= DrawingsService.MAX_ENCODED_FILENAME_LENGTH:
+            return encoded
+
+        suffix = PureWindowsPath(name).suffix
+        encoded_suffix = quote(suffix, safe="")
+        if len(encoded_suffix) > DrawingsService.MAX_ENCODED_EXTENSION_LENGTH:
+            suffix, encoded_suffix = "", ""
+
+        stem = name[: len(name) - len(suffix)]
+        budget = DrawingsService.MAX_ENCODED_FILENAME_LENGTH - len(encoded_suffix)
+        encoded_lengths = list(accumulate(len(quote(char, safe="")) for char in stem))
+        kept = bisect_right(encoded_lengths, budget)
+        return quote(stem[:kept], safe="") + encoded_suffix
 
     @staticmethod
     def decode_filename(value: str | None) -> str | None:
@@ -387,8 +409,7 @@ class DrawingsService:
 
         Unknown drawings and wrong admin_ids are reported through distinct
         errors so a client can fall back to opening an existing drawing
-        read-only. Guessing admin_ids is left to rate limiting in front of the
-        service rather than to the shape of this API.
+        read-only.
 
         Args:
             drawing_id: The UUID of the drawing to check.
@@ -403,14 +424,11 @@ class DrawingsService:
         existing = await self._s3.head_drawing(self.build_s3_key(drawing_id))
         self._authorize(drawing_id, admin_id, existing)
 
-    async def get_drawing_metadata(
-        self, drawing_id: uuid.UUID, admin_id: uuid.UUID
-    ) -> DrawingsMetadataResponse:
+    async def get_drawing_metadata(self, drawing_id: uuid.UUID) -> DrawingsMetadataResponse:
         """Return a drawing's stored metadata without transferring its content.
 
         Args:
             drawing_id: The UUID of the drawing to describe.
-            admin_id: Admin identifier that must match the stored drawing.
 
         Returns:
             A response containing the drawing ID, the original upload filename,
@@ -419,7 +437,6 @@ class DrawingsService:
 
         Raises:
             DrawingNotFoundError: If no drawing exists with the given identifier.
-            AdminIdMismatchError: If the admin_id does not match the stored one.
             S3Error: If the S3 head request fails or the stored timestamps are
                 missing or unparsable.
 
@@ -427,8 +444,6 @@ class DrawingsService:
         s3_key = self.build_s3_key(drawing_id)
 
         existing = await self._s3.head_drawing(s3_key)
-
-        self._authorize(drawing_id, admin_id, existing)
 
         # Unlike the update path, which reads timestamps it has just written,
         # this is a read of arbitrarily old objects, so corrupt or pre-existing

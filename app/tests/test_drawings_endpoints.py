@@ -6,6 +6,7 @@ updating KMZ drawing files via the FastAPI TestClient with a mocked S3 backend.
 
 import hashlib
 import io
+import logging
 import uuid
 import zipfile
 from datetime import datetime
@@ -495,6 +496,52 @@ def test_check_auth_scheme_is_case_insensitive(client: TestClient, valid_kmz_byt
     assert response.status_code == 204
 
 
+def test_check_auth_answers_are_not_cacheable(client: TestClient, valid_kmz_bytes: bytes):
+    """Every answer that depends on the Authorization header is marked no-store.
+
+    Otherwise a cache keyed on the URL alone could replay one caller's 204 to a
+    caller with a wrong admin_id, or a 403 to one with the right admin_id.
+    """
+    drawing_id, admin_id = _create(client, valid_kmz_bytes)
+    url = f"/api/wps/v1/drawings/{drawing_id}/check-auth"
+
+    for headers, status in ((_auth(admin_id), 204), (_auth(uuid.uuid4()), 403), ({}, 401)):
+        response = client.get(url, headers=headers)
+        assert response.status_code == status
+        assert response.headers["cache-control"] == "no-store, max-age=0"
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected_log"),
+    [
+        ({}, "Missing or non-Bearer Authorization header"),
+        ({"Authorization": "Basic c2VjcmV0LXRva2Vu"}, "Missing or non-Bearer Authorization header"),
+        ({"Authorization": "Bearer secret-token"}, "Bearer token is not a UUID"),
+    ],
+    ids=["absent", "wrong-scheme", "not-a-uuid"],
+)
+def test_unusable_authorization_is_logged_without_token(
+    client: TestClient,
+    valid_kmz_bytes: bytes,
+    caplog: pytest.LogCaptureFixture,
+    headers: dict[str, str],
+    expected_log: str,
+):
+    """A rejected Authorization header is logged at info level, never its value."""
+    drawing_id, _ = _create(client, valid_kmz_bytes)
+
+    with caplog.at_level(logging.INFO, logger="app.api.wps"):
+        response = client.get(f"/api/wps/v1/drawings/{drawing_id}/check-auth", headers=headers)
+
+    assert response.status_code == 401
+    records = [r for r in caplog.records if r.name == "app.api.wps"]
+    assert [r.levelno for r in records] == [logging.INFO]
+    assert expected_log in records[0].getMessage()
+    assert f"/api/wps/v1/drawings/{drawing_id}/check-auth" in records[0].getMessage()
+    assert "secret" not in caplog.text
+    assert "c2VjcmV0LXRva2Vu" not in caplog.text
+
+
 def test_check_auth_invalid_uuid(client: TestClient):
     """GET check-auth with a malformed drawing UUID returns 422."""
     response = client.get(
@@ -505,9 +552,9 @@ def test_check_auth_invalid_uuid(client: TestClient):
 
 def test_metadata_success(client: TestClient, valid_kmz_bytes: bytes):
     """GET metadata returns the original filename and the timestamps."""
-    drawing_id, admin_id = _create(client, valid_kmz_bytes, filename="France.kmz")
+    drawing_id, _ = _create(client, valid_kmz_bytes, filename="France.kmz")
 
-    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata", headers=_auth(admin_id))
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata")
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == drawing_id
@@ -518,9 +565,7 @@ def test_metadata_success(client: TestClient, valid_kmz_bytes: bytes):
 def test_metadata_reflects_update(client: TestClient, valid_kmz_bytes: bytes):
     """After an update, metadata reports the new filename and a later modified_at."""
     drawing_id, admin_id = _create(client, valid_kmz_bytes, filename="before.kmz")
-    before = client.get(
-        f"/api/wps/v1/drawings/{drawing_id}/metadata", headers=_auth(admin_id)
-    ).json()
+    before = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata").json()
 
     new_content = _build_kmz("<kml><Document><Placemark/></Document></kml>")
     update_resp = client.put(
@@ -531,9 +576,7 @@ def test_metadata_reflects_update(client: TestClient, valid_kmz_bytes: bytes):
     )
     assert update_resp.status_code == 200
 
-    after = client.get(
-        f"/api/wps/v1/drawings/{drawing_id}/metadata", headers=_auth(admin_id)
-    ).json()
+    after = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata").json()
     assert after["original_filename"] == "after.kmz"
     # created_at is preserved across the update, modified_at moves forward
     assert after["created_at"] == before["created_at"]
@@ -548,9 +591,9 @@ def test_metadata_unicode_filename_roundtrip(client: TestClient, valid_kmz_bytes
     S3 user metadata travels in HTTP headers and must be ASCII, so the name is
     percent-encoded on the way in and decoded on the way out.
     """
-    drawing_id, admin_id = _create(client, valid_kmz_bytes, filename="Zürich Höhenweg.kmz")
+    drawing_id, _ = _create(client, valid_kmz_bytes, filename="Zürich Höhenweg.kmz")
 
-    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata", headers=_auth(admin_id))
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata")
     assert response.status_code == 200
     assert response.json()["original_filename"] == "Zürich Höhenweg.kmz"
 
@@ -567,20 +610,60 @@ def test_metadata_strips_path_components(
     client: TestClient, valid_kmz_bytes: bytes, sent: str, expected: str
 ):
     """Directory components in the client filename are stripped before storage."""
-    drawing_id, admin_id = _create(client, valid_kmz_bytes, filename=sent)
+    drawing_id, _ = _create(client, valid_kmz_bytes, filename=sent)
 
-    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata", headers=_auth(admin_id))
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata")
     assert response.status_code == 200
     assert response.json()["original_filename"] == expected
 
 
 def test_metadata_long_filename_is_truncated(client: TestClient, valid_kmz_bytes: bytes):
-    """An over-long filename is truncated so it fits within the S3 metadata limit."""
-    drawing_id, admin_id = _create(client, valid_kmz_bytes, filename="a" * 500 + ".kmz")
+    """An over-long filename is shortened before its extension, which is kept."""
+    drawing_id, _ = _create(client, valid_kmz_bytes, filename="a" * 2000 + ".kmz")
 
-    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata", headers=_auth(admin_id))
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata")
     assert response.status_code == 200
-    assert response.json()["original_filename"] == "a" * DrawingsService.MAX_FILENAME_LENGTH
+    expected_stem = "a" * (DrawingsService.MAX_ENCODED_FILENAME_LENGTH - len(".kmz"))
+    assert response.json()["original_filename"] == expected_stem + ".kmz"
+
+
+# S3 rejects user metadata over 2 KB (keys and values, UTF-8), but moto does not
+# enforce the limit, so it is checked on the stored object instead.
+S3_USER_METADATA_LIMIT_BYTES = 2048
+
+
+@pytest.mark.parametrize(
+    "stem",
+    ["a" * 2000, "中" * 400, "😀" * 255, "Zürich " * 200],
+    ids=["ascii", "cjk", "emoji", "mixed"],
+)
+def test_long_filename_fits_s3_metadata_limit(
+    client: TestClient, valid_kmz_bytes: bytes, settings, s3_client, stem: str
+):
+    """However long or multi-byte the name, the stored metadata stays within 2 KB.
+
+    The cap applies to the percent-encoded form: each non-ASCII UTF-8 byte
+    becomes three characters, so capping the raw character count would let 255
+    emoji encode to over 3 KB.
+    """
+    drawing_id, _ = _create(client, valid_kmz_bytes, filename=stem + ".kmz")
+
+    metadata = s3_client.head_object(
+        Bucket=settings.aws_s3_bucket_name, Key=f"drawings/{drawing_id}.kmz"
+    )["Metadata"]
+    assert len(metadata["original-filename"]) <= DrawingsService.MAX_ENCODED_FILENAME_LENGTH
+    total = sum(len(k.encode()) + len(v.encode()) for k, v in metadata.items())
+    assert total <= S3_USER_METADATA_LIMIT_BYTES
+
+    name = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata").json()["original_filename"]
+    assert name.endswith(".kmz")
+    assert stem.startswith(name.removesuffix(".kmz"))
+
+
+def test_long_filename_with_overlong_extension_is_cut_as_a_whole():
+    """A "suffix" too long to be a real extension is not preserved."""
+    encoded = DrawingsService.encode_filename("x." + "b" * 2000, uuid.uuid4())
+    assert encoded == "x." + "b" * (DrawingsService.MAX_ENCODED_FILENAME_LENGTH - 2)
 
 
 def test_metadata_legacy_object_without_filename(client: TestClient, settings, s3_client):
@@ -599,9 +682,7 @@ def test_metadata_legacy_object_without_filename(client: TestClient, settings, s
         },
     )
 
-    response = client.get(
-        f"/api/wps/v1/drawings/{drawing_id}/metadata", headers=_auth(str(admin_id))
-    )
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata")
     assert response.status_code == 200
     data = response.json()
     assert data["original_filename"] is None
@@ -619,46 +700,43 @@ def test_metadata_unusable_timestamps(client: TestClient, settings, s3_client):
         Metadata={"admin-id": str(admin_id), "created-at": "not-a-timestamp"},
     )
 
-    response = client.get(
-        f"/api/wps/v1/drawings/{drawing_id}/metadata", headers=_auth(str(admin_id))
-    )
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata")
     assert response.status_code == 500
     assert "not-a-timestamp" not in response.json()["detail"]
 
 
-def test_metadata_wrong_admin_id(client: TestClient, valid_kmz_bytes: bytes):
-    """GET metadata with a mismatched admin_id returns 403 Forbidden."""
-    drawing_id, _ = _create(client, valid_kmz_bytes)
-
-    response = client.get(
-        f"/api/wps/v1/drawings/{drawing_id}/metadata", headers=_auth(uuid.uuid4())
-    )
-    assert response.status_code == 403
-    assert "detail" in response.json()
-
-
 def test_metadata_not_found(client: TestClient):
     """GET metadata for a non-existent drawing returns 404 Not Found."""
-    response = client.get(
-        "/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/metadata",
-        headers=_auth(str(uuid.uuid4())),
-    )
+    response = client.get("/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/metadata")
     assert response.status_code == 404
     assert "detail" in response.json()
 
 
-def test_metadata_missing_authorization(client: TestClient):
-    """GET metadata without an Authorization header returns 401."""
-    response = client.get("/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/metadata")
-    assert response.status_code == 401
-    assert response.headers["www-authenticate"] == "Bearer"
+def test_metadata_needs_no_admin_id(client: TestClient, valid_kmz_bytes: bytes):
+    """GET metadata is public, like the download that already exposes the filename."""
+    drawing_id, _ = _create(client, valid_kmz_bytes, filename="France.kmz")
+
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata")
+    assert response.status_code == 200
+    assert response.json()["original_filename"] == "France.kmz"
+    # A wrong admin_id is simply ignored rather than rejected
+    response = client.get(
+        f"/api/wps/v1/drawings/{drawing_id}/metadata", headers=_auth(uuid.uuid4())
+    )
+    assert response.status_code == 200
+
+
+def test_metadata_is_not_cacheable(client: TestClient, valid_kmz_bytes: bytes):
+    """GET metadata is marked no-store, since an update changes the answer."""
+    drawing_id, _ = _create(client, valid_kmz_bytes)
+
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata")
+    assert response.headers["cache-control"] == "no-store, max-age=0"
 
 
 def test_metadata_invalid_uuid(client: TestClient):
     """GET metadata with a malformed drawing UUID returns 422."""
-    response = client.get(
-        "/api/wps/v1/drawings/not-a-valid-uuid/metadata", headers=_auth(str(uuid.uuid4()))
-    )
+    response = client.get("/api/wps/v1/drawings/not-a-valid-uuid/metadata")
     assert response.status_code == 422
 
 
@@ -671,9 +749,9 @@ def test_metadata_path_only_filename_falls_back(
     Such a name leaves no usable basename behind, and storing it verbatim would
     hand clients back a filename they cannot write to disk.
     """
-    drawing_id, admin_id = _create(client, valid_kmz_bytes, filename=sent)
+    drawing_id, _ = _create(client, valid_kmz_bytes, filename=sent)
 
-    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata", headers=_auth(admin_id))
+    response = client.get(f"/api/wps/v1/drawings/{drawing_id}/metadata")
     assert response.status_code == 200
     assert response.json()["original_filename"] == f"{drawing_id}.kmz"
 

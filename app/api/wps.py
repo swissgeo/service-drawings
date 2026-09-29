@@ -7,11 +7,12 @@ are prefixed with /api/wps/v1 per SWISSGEO API standards.
 
 Routes that need the admin_id take it as an "Authorization: Bearer <admin_id>"
 header, which keeps it out of URLs, access logs and browser history while
-letting check-auth and metadata be plain GETs. A missing or malformed
+letting check-auth be a plain GET. A missing or malformed
 header answers 401, an unknown drawing_id 404, and a wrong admin_id for an
 existing drawing 403.
 """
 
+import logging
 import uuid
 from typing import Annotated
 
@@ -29,6 +30,8 @@ from app.schemas.drawings import (
 )
 from app.schemas.errors import ErrorResponse
 from app.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -63,6 +66,7 @@ admin_id_bearer = HTTPBearer(
 
 
 async def get_admin_id(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(admin_id_bearer)],
 ) -> uuid.UUID:
     """Extract the admin_id from an "Authorization: Bearer <admin_id>" header.
@@ -72,11 +76,16 @@ async def get_admin_id(
             or carries a token that is not a UUID.
 
     """
+    # Logged to ease debugging client integrations; the token itself never is.
     if credentials is None:
+        logger.info(
+            "Missing or non-Bearer Authorization header on %s %s", request.method, request.url.path
+        )
         raise MissingCredentialsError
     try:
         return uuid.UUID(credentials.credentials)
     except ValueError as e:
+        logger.info("Bearer token is not a UUID on %s %s", request.method, request.url.path)
         raise MissingCredentialsError from e
 
 
@@ -192,31 +201,37 @@ async def check_auth(
     403 when the drawing exists but the admin_id does not match, and 404 when
     the drawing does not exist. A client can therefore fall back to opening an
     existing drawing read-only after a 403 without a second request.
+
+    The answer depends on the Authorization header, so it is marked no-store:
+    a cache keyed on the URL alone must never replay it to another caller.
     """
     await drawings.check_auth(drawing_id, admin_id)
-    return Response(status_code=204)
+    return Response(status_code=204, headers={"Cache-Control": CACHE_CONTROL_NO_STORE})
 
 
 @router.get(
     "/drawings/{drawing_id}/metadata",
     responses={
-        **AUTH_RESPONSES,
+        404: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
 )
 async def get_drawing_metadata(
     drawing_id: uuid.UUID,
-    admin_id: AdminIdAuth,
+    response: Response,
     drawings: DrawingsServiceDep,
 ) -> DrawingsMetadataResponse:
     """Retrieve a drawing's metadata without downloading its content.
 
     Returns the filename used at the last upload and the creation/update
-    timestamps. The admin_id is sent as "Authorization: Bearer <admin_id>" and
-    must match the stored drawing metadata, otherwise the request is rejected
-    with 403.
+    timestamps. Like the download itself, which already exposes the filename
+    through Content-Disposition, it needs no admin_id, so a client can show a
+    drawing's details in read-only mode too.
+
+    Marked no-store because an update changes the answer.
     """
-    return await drawings.get_drawing_metadata(drawing_id, admin_id)
+    response.headers["Cache-Control"] = CACHE_CONTROL_NO_STORE
+    return await drawings.get_drawing_metadata(drawing_id)
 
 
 @router.delete(

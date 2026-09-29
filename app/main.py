@@ -29,6 +29,7 @@ from app.core.exceptions import (
     MissingCredentialsError,
     S3Error,
 )
+from app.core.s3 import CACHE_CONTROL_NO_STORE
 from app.middlewares.body_size import MaxBodySizeMiddleware
 from app.openapi import get_openapi_spec_url, setup_openapi
 from app.otel import initialize_instrumentation, shutdown_otel
@@ -127,14 +128,22 @@ async def missing_credentials_handler(
     return JSONResponse(
         status_code=401,
         content={"detail": exc.message},
-        headers={"WWW-Authenticate": "Bearer"},
+        headers={"WWW-Authenticate": "Bearer", "Cache-Control": CACHE_CONTROL_NO_STORE},
     )
 
 
 @app.exception_handler(AdminIdMismatchError)
 async def admin_id_mismatch_handler(_request: Request, exc: AdminIdMismatchError) -> JSONResponse:
-    """Handle admin_id mismatch errors with a 403 Forbidden response."""
-    return JSONResponse(status_code=403, content={"detail": exc.message})
+    """Handle admin_id mismatch errors with a 403 Forbidden response.
+
+    Like the 401, the answer depends on the Authorization header, so it must
+    never be cached and replayed to a caller holding the right admin_id.
+    """
+    return JSONResponse(
+        status_code=403,
+        content={"detail": exc.message},
+        headers={"Cache-Control": CACHE_CONTROL_NO_STORE},
+    )
 
 
 @app.exception_handler(DrawingNotFoundError)
