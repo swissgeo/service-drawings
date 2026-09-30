@@ -1,21 +1,37 @@
 """WPS drawings API router.
 
-Provides REST endpoints for creating, retrieving, and updating KMZ drawing
-files stored in S3 and served through CloudFront. All routes are prefixed
-with /api/wps/v1 per SWISSGEO API standards.
+Provides REST endpoints for creating, retrieving, updating, and deleting KMZ
+drawing files stored in S3 and served through CloudFront, plus endpoints to
+check a drawing_id/admin_id pair and to read a drawing's metadata. All routes
+are prefixed with /api/wps/v1 per SWISSGEO API standards.
+
+Routes that need the admin_id take it as an "Authorization: Bearer <admin_id>"
+header, which keeps it out of URLs, access logs and browser history while
+letting check-auth be a plain GET. A missing or malformed
+header answers 401, an unknown drawing_id 404, and a wrong admin_id for an
+existing drawing 403.
 """
 
+import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.drawings import DrawingsService, DrawingsServiceDep
+from app.core.exceptions import MissingCredentialsError
 from app.core.s3 import CACHE_CONTROL_NO_STORE
-from app.schemas.drawings import DrawingsCreateResponse, DrawingsUpdateResponse
+from app.schemas.drawings import (
+    DrawingsCreateResponse,
+    DrawingsMetadataResponse,
+    DrawingsUpdateResponse,
+)
 from app.schemas.errors import ErrorResponse
 from app.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -39,13 +55,47 @@ KmzFile = Annotated[
     File(description="The KMZ file to upload. Only KMZ files are accepted."),
 ]
 
-AdminIdForm = Annotated[
-    uuid.UUID,
-    Form(
-        description="Admin identifier required to authorize the operation",
-        examples=["00000000-0000-0000-0000-000000000000"],
-    ),
-]
+# auto_error is off so that a missing header answers 401 through the service's
+# own error handler, uniformly with a malformed one; the scheme is still
+# declared in the OpenAPI spec.
+admin_id_bearer = HTTPBearer(
+    auto_error=False,
+    scheme_name="AdminId",
+    description="The admin_id returned when the drawing was created, sent as a bearer token.",
+)
+
+
+async def get_admin_id(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(admin_id_bearer)],
+) -> uuid.UUID:
+    """Extract the admin_id from an "Authorization: Bearer <admin_id>" header.
+
+    Raises:
+        MissingCredentialsError: If the header is absent, uses another scheme,
+            or carries a token that is not a UUID.
+
+    """
+    # Logged to ease debugging client integrations; the token itself never is.
+    if credentials is None:
+        logger.info(
+            "Missing or non-Bearer Authorization header on %s %s", request.method, request.url.path
+        )
+        raise MissingCredentialsError
+    try:
+        return uuid.UUID(credentials.credentials)
+    except ValueError as e:
+        logger.info("Bearer token is not a UUID on %s %s", request.method, request.url.path)
+        raise MissingCredentialsError from e
+
+
+AdminIdAuth = Annotated[uuid.UUID, Depends(get_admin_id)]
+
+AUTH_RESPONSES: dict[int | str, dict] = {
+    401: {"model": ErrorResponse},
+    403: {"model": ErrorResponse},
+    404: {"model": ErrorResponse},
+}
 
 
 @router.post(
@@ -87,14 +137,17 @@ async def get_drawing(
 
     Streams the KMZ binary content directly from S3 with the appropriate
     Content-Type and Content-Disposition headers for an attachment download.
+    The download filename is the one the client used at the last upload, so
+    browsers save the drawing under its original name; drawings stored before
+    that name was recorded fall back to "{drawing_id}.kmz".
     """
-    stream, _ = await drawings.get_drawing(drawing_id)
+    stream, filename = await drawings.get_drawing(drawing_id)
 
     return StreamingResponse(
         stream,
         media_type=DrawingsService.KMZ_CONTENT_TYPE,
         headers={
-            "Content-Disposition": f'attachment; filename="{drawing_id}.kmz"',
+            "Content-Disposition": DrawingsService.build_content_disposition(filename),
             "Cache-Control": CACHE_CONTROL_NO_STORE,
         },
     )
@@ -105,8 +158,7 @@ async def get_drawing(
     response_model=DrawingsUpdateResponse,
     responses={
         400: {"model": ErrorResponse},
-        403: {"model": ErrorResponse},
-        404: {"model": ErrorResponse},
+        **AUTH_RESPONSES,
         413: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
@@ -114,40 +166,92 @@ async def get_drawing(
 async def update_drawing(  # noqa: PLR0913, PLR0917
     request: Request,
     drawing_id: uuid.UUID,
-    admin_id: AdminIdForm,
+    admin_id: AdminIdAuth,
     file: KmzFile,
     sha256: Sha256Form,
     drawings: DrawingsServiceDep,
 ) -> DrawingsUpdateResponse:
     """Update an existing KMZ drawing by overwriting it at the same S3 key.
 
-    Only KMZ files are accepted. The admin_id must match the stored drawing
-    metadata, otherwise the request is rejected with 403. If the new content
-    is identical to the stored one, the request succeeds without re-uploading.
-    Returns the drawing ID, access token, access URL, and creation/update
-    timestamps.
+    Only KMZ files are accepted. The admin_id is sent as "Authorization:
+    Bearer <admin_id>" and must match the stored drawing metadata, otherwise
+    the request is rejected with 403. If the new content is identical to the
+    stored one, the request succeeds without re-uploading. Returns the drawing
+    ID, access token, access URL, and creation/update timestamps.
     """
     return await drawings.update_drawing(drawing_id, admin_id, file, request, sha256)
+
+
+@router.get(
+    "/drawings/{drawing_id}/check-auth",
+    status_code=204,
+    responses={
+        **AUTH_RESPONSES,
+        500: {"model": ErrorResponse},
+    },
+)
+async def check_auth(
+    drawing_id: uuid.UUID,
+    admin_id: AdminIdAuth,
+    drawings: DrawingsServiceDep,
+) -> Response:
+    """Check whether an admin_id grants write access to a drawing.
+
+    Answers through the status code alone: 204 when the admin_id matches,
+    403 when the drawing exists but the admin_id does not match, and 404 when
+    the drawing does not exist. A client can therefore fall back to opening an
+    existing drawing read-only after a 403 without a second request.
+
+    The answer depends on the Authorization header, so it is marked no-store:
+    a cache keyed on the URL alone must never replay it to another caller.
+    """
+    await drawings.check_auth(drawing_id, admin_id)
+    return Response(status_code=204, headers={"Cache-Control": CACHE_CONTROL_NO_STORE})
+
+
+@router.get(
+    "/drawings/{drawing_id}/metadata",
+    responses={
+        404: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+async def get_drawing_metadata(
+    drawing_id: uuid.UUID,
+    response: Response,
+    drawings: DrawingsServiceDep,
+) -> DrawingsMetadataResponse:
+    """Retrieve a drawing's metadata without downloading its content.
+
+    Returns the filename used at the last upload and the creation/update
+    timestamps. Like the download itself, which already exposes the filename
+    through Content-Disposition, it needs no admin_id, so a client can show a
+    drawing's details in read-only mode too.
+
+    Marked no-store because an update changes the answer.
+    """
+    response.headers["Cache-Control"] = CACHE_CONTROL_NO_STORE
+    return await drawings.get_drawing_metadata(drawing_id)
 
 
 @router.delete(
     "/drawings/{drawing_id}",
     status_code=204,
     responses={
-        403: {"model": ErrorResponse},
-        404: {"model": ErrorResponse},
+        **AUTH_RESPONSES,
         500: {"model": ErrorResponse},
     },
 )
 async def delete_drawing(
     drawing_id: uuid.UUID,
-    admin_id: AdminIdForm,
+    admin_id: AdminIdAuth,
     drawings: DrawingsServiceDep,
 ) -> Response:
     """Delete a KMZ drawing.
 
-    The admin_id must match the stored drawing metadata, otherwise the request
-    is rejected with 403. The deletion is permanent.
+    The admin_id is sent as "Authorization: Bearer <admin_id>" and must match
+    the stored drawing metadata, otherwise the request is rejected with 403.
+    The deletion is permanent.
     """
     await drawings.delete_drawing(drawing_id, admin_id)
     return Response(status_code=204)

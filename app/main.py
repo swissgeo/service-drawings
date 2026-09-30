@@ -26,8 +26,10 @@ from app.core.exceptions import (
     DigestMismatchError,
     DrawingNotFoundError,
     InvalidKMZError,
+    MissingCredentialsError,
     S3Error,
 )
+from app.core.s3 import CACHE_CONTROL_NO_STORE
 from app.middlewares.body_size import MaxBodySizeMiddleware
 from app.openapi import get_openapi_spec_url, setup_openapi
 from app.otel import initialize_instrumentation, shutdown_otel
@@ -114,10 +116,34 @@ async def digest_mismatch_handler(_request: Request, exc: DigestMismatchError) -
     return JSONResponse(status_code=400, content={"detail": exc.message})
 
 
+@app.exception_handler(MissingCredentialsError)
+async def missing_credentials_handler(
+    _request: Request, exc: MissingCredentialsError
+) -> JSONResponse:
+    """Handle missing or malformed credentials with a 401 Unauthorized response.
+
+    RFC 9110 requires a 401 to carry a WWW-Authenticate challenge naming the
+    scheme the client should use.
+    """
+    return JSONResponse(
+        status_code=401,
+        content={"detail": exc.message},
+        headers={"WWW-Authenticate": "Bearer", "Cache-Control": CACHE_CONTROL_NO_STORE},
+    )
+
+
 @app.exception_handler(AdminIdMismatchError)
 async def admin_id_mismatch_handler(_request: Request, exc: AdminIdMismatchError) -> JSONResponse:
-    """Handle admin_id mismatch errors with a 403 Forbidden response."""
-    return JSONResponse(status_code=403, content={"detail": exc.message})
+    """Handle admin_id mismatch errors with a 403 Forbidden response.
+
+    Like the 401, the answer depends on the Authorization header, so it must
+    never be cached and replayed to a caller holding the right admin_id.
+    """
+    return JSONResponse(
+        status_code=403,
+        content={"detail": exc.message},
+        headers={"Cache-Control": CACHE_CONTROL_NO_STORE},
+    )
 
 
 @app.exception_handler(DrawingNotFoundError)

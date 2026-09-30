@@ -12,6 +12,18 @@ def test_get_openapi_json(client: TestClient):
     assert response.headers["content-type"].startswith("application/json")
 
 
+def test_get_openapi_json_under_drawings_prefix(client: TestClient):
+    """The public spec is also served under the drawings API prefix, identically."""
+    response = client.get("/api/wps/v1/drawings/openapi.json")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.content == client.get("openapi.json").content
+    assert "/checker" not in response.json()["paths"]
+    # Not listed as an operation of its own in the spec
+    assert "/api/wps/v1/drawings/openapi.json" not in response.json()["paths"]
+
+
 def test_get_openapi_doc(client: TestClient):
     response = client.get("docs")
 
@@ -122,7 +134,7 @@ def test_public_spec_has_put_error_responses(client: TestClient):
     spec = client.get("openapi.json").json()
 
     put_op = spec["paths"]["/api/wps/v1/drawings/{drawing_id}"]["put"]
-    for status in ("400", "403", "404"):
+    for status in ("400", "404"):
         assert status in put_op["responses"]
         schema = put_op["responses"][status]["content"]["application/json"]["schema"]
         assert "$ref" in schema
@@ -148,6 +160,37 @@ def test_public_spec_has_get_error_responses(client: TestClient):
         assert status in get_op["responses"]
         schema = get_op["responses"][status]["content"]["application/json"]["schema"]
         assert "$ref" in schema
+
+
+def test_public_spec_declares_admin_id_bearer_scheme(client: TestClient):
+    """Verify routes taking an admin_id declare the bearer scheme and its error responses."""
+    spec = client.get("openapi.json").json()
+
+    scheme = spec["components"]["securitySchemes"]["AdminId"]
+    assert scheme["type"] == "http"
+    assert scheme["scheme"] == "bearer"
+
+    paths = spec["paths"]
+    protected = [
+        paths["/api/wps/v1/drawings/{drawing_id}"]["put"],
+        paths["/api/wps/v1/drawings/{drawing_id}"]["delete"],
+        paths["/api/wps/v1/drawings/{drawing_id}/check-auth"]["get"],
+    ]
+    for op in protected:
+        assert op["security"] == [{"AdminId": []}]
+        for status in ("401", "403", "404"):
+            assert status in op["responses"]
+
+    # Creating a drawing, downloading it and reading its metadata need no admin_id
+    public = [
+        paths["/api/wps/v1/drawings"]["post"],
+        paths["/api/wps/v1/drawings/{drawing_id}"]["get"],
+        paths["/api/wps/v1/drawings/{drawing_id}/metadata"]["get"],
+    ]
+    for op in public:
+        assert "security" not in op
+        assert "401" not in op["responses"]
+        assert "403" not in op["responses"]
 
 
 def test_public_spec_includes_drawings_tag(client: TestClient):

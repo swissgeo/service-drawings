@@ -81,6 +81,23 @@ assert_content_type() {
     fi
 }
 
+assert_header() {
+    local desc="$1" url="$2" header="$3" expected="$4"
+    local actual
+    # Header names are case-insensitive, and the trailing CR of the status line
+    # would otherwise end up inside the compared value.
+    actual="$(curl -s -o /dev/null -D - "$url" \
+        | tr -d '\r' \
+        | grep -i "^${header}:" \
+        | head -n 1 \
+        | cut -d' ' -f2-)"
+    if [[ "$actual" == "$expected" ]]; then
+        pass "$desc"
+    else
+        fail "$desc — expected '$expected', got '$actual'"
+    fi
+}
+
 # -------------------------------------------------------------------
 # Load environment
 # -------------------------------------------------------------------
@@ -263,6 +280,14 @@ assert_content_type \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID" \
     "application/vnd.google-earth.kmz"
 
+# The name the file was uploaded under, so the browser saves it as valid.kmz
+# rather than as the drawing UUID.
+assert_header \
+    "  Content-Disposition carries the original filename" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID" \
+    "content-disposition" \
+    "attachment; filename=\"valid.kmz\"; filename*=UTF-8''valid.kmz"
+
 if cmp -s "$TMPDIR/valid.kmz" "$TMPDIR/downloaded.kmz"; then
     pass "  Downloaded content matches original"
 else
@@ -279,23 +304,29 @@ echo -e "\n${BOLD}=== PUT /api/wps/v1/drawings/{id} ===${NC}"
 WRONG_ADMIN_ID="00000000-0000-0000-0000-000000000001"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    -H "Authorization: Bearer $WRONG_ADMIN_ID" \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
-    -F "admin_id=$WRONG_ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
-assert_status "Reject wrong admin_id" 403 "$HTTP"
+assert_status "Wrong admin_id → 403" 403 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
-    -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
+assert_status "Without Authorization header → 401" 401 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    -H "Authorization: Bearer $ADMIN_ID" \
+    -F "file=@$TMPDIR/valid2.kmz" \
+    -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
     "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000")
 assert_status "Update non-existent drawing → 404" 404 "$HTTP"
 
 RESP=$(curl -s -w '\n%{http_code}' -X PUT \
+    -H "Authorization: Bearer $ADMIN_ID" \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
-    -F "admin_id=$ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 BODY="$(echo "$RESP" | sed '$d')"
 HTTP="$(echo "$RESP" | tail -n 1)"
@@ -309,9 +340,9 @@ fi
 
 # Unchanged content short-circuits with 200 (no re-upload)
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    -H "Authorization: Bearer $ADMIN_ID" \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
-    -F "admin_id=$ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 assert_status "PUT unchanged content → 200" 200 "$HTTP"
 
@@ -325,31 +356,137 @@ else
     fail "  Downloaded content does NOT match updated file"
 fi
 
+assert_header \
+    "  Content-Disposition follows the updated filename" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID" \
+    "content-disposition" \
+    "attachment; filename=\"valid2.kmz\"; filename*=UTF-8''valid2.kmz"
+
+# --- GET /api/wps/v1/drawings/{id}/check-auth ---
+echo -e "\n${BOLD}=== GET /api/wps/v1/drawings/{id}/check-auth ===${NC}"
+
+RESP=$(curl -s -w '\n%{http_code}' \
+    -H "Authorization: Bearer $ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth")
+BODY="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
+assert_status "Matching drawing_id/admin_id pair → 204" 204 "$HTTP"
+if [[ -z "$BODY" ]]; then
+    pass "  Empty body"
+else
+    fail "  Expected an empty body, got '$BODY'"
+fi
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $WRONG_ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth")
+assert_status "Existing drawing, wrong admin_id → 403" 403 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/check-auth")
+assert_status "Unknown drawing → 404" 404 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth")
+assert_status "Without Authorization header → 401" 401 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer not-a-uuid" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth")
+assert_status "Bearer token that is not a UUID → 401" 401 "$HTTP"
+
+assert_header \
+    "  401 carries a Bearer challenge" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth" \
+    "www-authenticate" \
+    "Bearer"
+
+# The answer depends on the Authorization header, so no cache may replay it.
+assert_header \
+    "  401 is marked Cache-Control: no-store" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth" \
+    "cache-control" \
+    "no-store, max-age=0"
+
+if curl -s -o /dev/null -D - -H "Authorization: Bearer $ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth" \
+    | tr -d '\r' | grep -qi '^cache-control: no-store, max-age=0$'; then
+    pass "  204 is marked Cache-Control: no-store"
+else
+    fail "  204 is missing Cache-Control: no-store"
+fi
+
+# --- GET /api/wps/v1/drawings/{id}/metadata ---
+echo -e "\n${BOLD}=== GET /api/wps/v1/drawings/{id}/metadata ===${NC}"
+
+# Public, like the download: no Authorization header needed.
+RESP=$(curl -s -w '\n%{http_code}' \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
+BODY="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
+assert_status "Read metadata" 200 "$HTTP"
+assert_json_field "  body.id=$DRAWING_ID" "$BODY" "id" "$DRAWING_ID"
+# The last successful update uploaded valid2.kmz, so that is the recorded name.
+assert_json_field "  body.original_filename=valid2.kmz" "$BODY" "original_filename" "valid2.kmz"
+
+if echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['created_at'] and d['modified_at']; assert d['modified_at'] >= d['created_at']" 2>/dev/null; then
+    pass "  Timestamps present and modified_at >= created_at"
+else
+    fail "  Timestamps missing or inconsistent: $BODY"
+fi
+
+assert_header \
+    "  Cache-Control: no-store" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata" \
+    "cache-control" \
+    "no-store, max-age=0"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+    "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/metadata")
+assert_status "Metadata for non-existent drawing → 404" 404 "$HTTP"
+
 # --- DELETE /api/wps/v1/drawings/{id} ---
 echo -e "\n${BOLD}=== DELETE /api/wps/v1/drawings/{id} ===${NC}"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
-    -F "admin_id=$WRONG_ADMIN_ID" \
+    -H "Authorization: Bearer $WRONG_ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
-assert_status "Reject wrong admin_id" 403 "$HTTP"
+assert_status "Wrong admin_id → 403" 403 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
-    -F "admin_id=$ADMIN_ID" \
+    -H "Authorization: Bearer $ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000")
 assert_status "Delete non-existent drawing → 404" 404 "$HTTP"
 
-HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
-    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
-assert_status "Delete without admin_id form field → 422" 422 "$HTTP"
-
+# The admin_id is read from the header only; the old form field no longer counts.
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
     -F "admin_id=$ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
+assert_status "admin_id as form field instead of header → 401" 401 "$HTTP"
+
+# A rejected delete must not have deleted anything.
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
+assert_status "Drawing survives rejected deletes → 200" 200 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+    -H "Authorization: Bearer $ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 assert_status "Delete existing drawing → 204" 204 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 assert_status "Deleted drawing no longer retrievable → 404" 404 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth")
+assert_status "check-auth on deleted drawing → 404" 404 "$HTTP"
+
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
+assert_status "Deleted drawing has no metadata → 404" 404 "$HTTP"
 
 # --- OpenAPI spec ---
 echo -e "\n${BOLD}=== OpenAPI Spec ===${NC}"
@@ -368,6 +505,17 @@ if echo "$RESP" | python3 -c "import sys,json; paths=json.load(sys.stdin)['paths
     pass "  /checker NOT in public spec (Internal tag)"
 else
     fail "  /checker incorrectly exposed in public spec"
+fi
+
+RESP=$(curl -s -w '\n%{http_code}' "$BASE_URL/api/wps/v1/drawings/openapi.json")
+PREFIXED_SPEC="$(echo "$RESP" | sed '$d')"
+HTTP="$(echo "$RESP" | tail -n 1)"
+assert_status "GET /api/wps/v1/drawings/openapi.json" 200 "$HTTP"
+
+if [[ "$PREFIXED_SPEC" == "$(curl -s "$BASE_URL/openapi.json")" ]]; then
+    pass "  Identical to /openapi.json"
+else
+    fail "  Differs from /openapi.json"
 fi
 
 # ===================================================================

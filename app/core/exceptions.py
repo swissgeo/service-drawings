@@ -1,9 +1,9 @@
 """Custom exception hierarchy for service-drawings.
 
 Defines a base ServiceDrawingsError and subclasses for specific failure modes:
-invalid KMZ content, digest mismatch, admin identifier mismatch, missing
-drawings, and S3 errors. Size limits are enforced by the body size middleware,
-so there is no oversized-file exception.
+invalid KMZ content, digest mismatch, missing or malformed credentials, admin
+identifier mismatch, missing drawings, and S3 errors. Size limits are enforced
+by the body size middleware, so there is no oversized-file exception.
 """
 
 
@@ -32,6 +32,15 @@ class DigestMismatchError(ServiceDrawingsError):
 
     def __init__(self, message: str | None = None) -> None:
         super().__init__(message or "SHA-256 digest does not match the uploaded content")
+
+
+class MissingCredentialsError(ServiceDrawingsError):
+    """Raised when a request lacks a usable "Authorization: Bearer <admin_id>" header."""
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(
+            message or "Missing or malformed Authorization header, expected 'Bearer <admin_id>'"
+        )
 
 
 class AdminIdMismatchError(ServiceDrawingsError):

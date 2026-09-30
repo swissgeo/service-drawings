@@ -4,17 +4,29 @@ import hashlib
 import hmac
 import logging
 import uuid
+from bisect import bisect_right
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from itertools import accumulate
+from pathlib import PureWindowsPath
 from typing import Annotated
+from urllib.parse import quote, unquote
 
 from fastapi import Depends, Request, UploadFile
 from pydantic import HttpUrl
 
-from app.core.exceptions import AdminIdMismatchError, DigestMismatchError
+from app.core.exceptions import (
+    AdminIdMismatchError,
+    DigestMismatchError,
+    S3Error,
+)
 from app.core.s3 import S3Service, S3ServiceDep
 from app.core.validation import validate_kmz
-from app.schemas.drawings import DrawingsCreateResponse, DrawingsUpdateResponse
+from app.schemas.drawings import (
+    DrawingsCreateResponse,
+    DrawingsMetadataResponse,
+    DrawingsUpdateResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +36,13 @@ class DrawingsService:
 
     S3_KEY_PREFIX = "drawings"
     KMZ_CONTENT_TYPE = "application/vnd.google-earth.kmz"
+    # S3 caps user metadata at 2 KB across all keys and values. The other entries
+    # take about 220 bytes, so the encoded name gets 1 KB, leaving ample headroom.
+    # The cap applies after encoding because percent-encoding turns each non-ASCII
+    # UTF-8 byte into three characters: 255 emoji would encode to over 3 KB.
+    MAX_ENCODED_FILENAME_LENGTH = 1024
+    # An extension longer than this is not a real one and is truncated with the rest.
+    MAX_ENCODED_EXTENSION_LENGTH = 32
 
     def __init__(self, s3: S3Service) -> None:
         self._s3 = s3
@@ -40,6 +59,110 @@ class DrawingsService:
 
         """
         return f"{DrawingsService.S3_KEY_PREFIX}/{drawing_id}.kmz"
+
+    @staticmethod
+    def _authorize(drawing_id: uuid.UUID, admin_id: uuid.UUID, metadata: dict[str, str]) -> None:
+        """Check an admin_id against a drawing's stored metadata.
+
+        The comparison is constant-time because every caller is an oracle on a
+        secret value.
+
+        Args:
+            drawing_id: The UUID of the drawing, used for logging only.
+            admin_id: Admin identifier presented by the client.
+            metadata: The drawing's S3 metadata, as returned by head_drawing().
+
+        Raises:
+            AdminIdMismatchError: If the admin_id does not match the stored one.
+
+        """
+        if not hmac.compare_digest(metadata.get("admin-id", ""), str(admin_id)):
+            logger.warning("admin_id mismatch for drawing %s", drawing_id)
+            raise AdminIdMismatchError
+
+    @staticmethod
+    def encode_filename(filename: str | None, drawing_id: uuid.UUID) -> str:
+        """Normalise a client-supplied filename into an S3-metadata-safe value.
+
+        S3 user metadata travels in HTTP headers and must therefore be US-ASCII,
+        so the name is percent-encoded; decode_filename() reverses this. Any
+        directory component is stripped first, since the value is echoed back to
+        clients and must never be mistaken for a path.
+
+        Args:
+            filename: The filename reported by the client, which may be absent.
+            drawing_id: The UUID of the drawing, used to build a fallback name
+                when the client sends no usable filename.
+
+        Returns:
+            The percent-encoded basename, at most MAX_ENCODED_FILENAME_LENGTH
+            characters long, or the percent-encoded fallback "{drawing_id}.kmz"
+            when the client sent no filename or one that is purely path syntax.
+            An over-long name is shortened before its extension, so "….kmz"
+            stays "….kmz".
+
+        """
+        # PureWindowsPath treats both forward and backward slashes as separators, so a
+        # single call strips directory components from POSIX and Windows paths alike.
+        name = PureWindowsPath(filename).name if filename else ""
+        # A name that is purely path syntax ("/", "..") leaves nothing usable behind.
+        if name in {"", ".", ".."}:
+            name = f"{drawing_id}.kmz"
+
+        encoded = quote(name, safe="")
+        if len(encoded) <= DrawingsService.MAX_ENCODED_FILENAME_LENGTH:
+            return encoded
+
+        suffix = PureWindowsPath(name).suffix
+        encoded_suffix = quote(suffix, safe="")
+        if len(encoded_suffix) > DrawingsService.MAX_ENCODED_EXTENSION_LENGTH:
+            suffix, encoded_suffix = "", ""
+
+        stem = name[: len(name) - len(suffix)]
+        budget = DrawingsService.MAX_ENCODED_FILENAME_LENGTH - len(encoded_suffix)
+        encoded_lengths = list(accumulate(len(quote(char, safe="")) for char in stem))
+        kept = bisect_right(encoded_lengths, budget)
+        return quote(stem[:kept], safe="") + encoded_suffix
+
+    @staticmethod
+    def decode_filename(value: str | None) -> str | None:
+        """Decode a filename previously stored by encode_filename().
+
+        Args:
+            value: The percent-encoded metadata value, absent for drawings
+                stored before the original filename was recorded.
+
+        Returns:
+            The original filename, or None when the metadata does not carry one.
+
+        """
+        return unquote(value) if value else None
+
+    @staticmethod
+    def build_content_disposition(filename: str) -> str:
+        """Build the attachment Content-Disposition header for a download filename.
+
+        RFC 6266 carries the name twice: a bare "filename" restricted to
+        printable US-ASCII, and a "filename*" holding the exact UTF-8 name.
+        Clients that understand "filename*" use it and ignore the other, so the
+        ASCII form is only a fallback and may safely lose characters.
+
+        Args:
+            filename: The name the browser should save the file under.
+
+        Returns:
+            The full header value, e.g.
+            `attachment; filename="Z_rich.kmz"; filename*=UTF-8''Z%C3%BCrich.kmz`.
+
+        """
+        # A quote or backslash would terminate or escape the quoted-string, and
+        # non-ASCII characters cannot appear in it at all, so the fallback keeps
+        # only what a client can read back verbatim.
+        ascii_name = "".join(
+            c if c.isascii() and c.isprintable() and c not in '"\\' else "_" for c in filename
+        )
+        ext_value = "UTF-8''" + quote(filename, safe="")
+        return f'attachment; filename="{ascii_name}"; filename*={ext_value}'
 
     async def _validate_digest(self, file: UploadFile, sha256: str) -> int:
         """Compute the file digest, verify it against the client value, and return its size.
@@ -83,7 +206,9 @@ class DrawingsService:
         """Validate, hash, upload a KMZ drawing and return its metadata.
 
         Args:
-            file: The KMZ file uploaded as multipart/form-data.
+            file: The KMZ file uploaded as multipart/form-data. Its filename is
+                recorded as S3 metadata so it can be read back later through
+                get_drawing_metadata().
             request: The incoming request, used to build the access URL from
                 the same domain the client used to reach the service.
             sha256: The SHA-256 hex digest of the file, computed by the client
@@ -116,6 +241,7 @@ class DrawingsService:
             metadata={
                 "sha256": sha256.lower(),
                 "admin-id": str(admin_id),
+                "original-filename": self.encode_filename(file.filename, drawing_id),
                 "created-at": now,
                 "modified-at": now,
             },
@@ -150,12 +276,15 @@ class DrawingsService:
 
         Validates the admin_id against the stored metadata, verifies the new
         content, then overwrites the object at the same S3 key. If the content
-        is unchanged, the upload is skipped entirely.
+        is unchanged, the upload is skipped entirely, which also means a
+        rename that carries identical bytes leaves the recorded original
+        filename untouched.
 
         Args:
             drawing_id: The UUID of the drawing to update.
             admin_id: Admin identifier that must match the stored drawing.
-            file: The KMZ file uploaded as multipart/form-data.
+            file: The KMZ file uploaded as multipart/form-data. Its filename
+                replaces the recorded original filename.
             request: The incoming request, used to build the access URL from
                 the same domain the client used to reach the service.
             sha256: The SHA-256 hex digest of the file, computed by the client
@@ -181,9 +310,7 @@ class DrawingsService:
         # any expensive validation happens
         existing = await self._s3.head_drawing(s3_key)
 
-        if existing.get("admin-id") != str(admin_id):
-            logger.warning("admin_id mismatch for drawing %s", drawing_id)
-            raise AdminIdMismatchError
+        self._authorize(drawing_id, admin_id, existing)
 
         await validate_kmz(file)
         size = await self._validate_digest(file, sha256)
@@ -203,6 +330,7 @@ class DrawingsService:
         metadata = {
             "sha256": sha256.lower(),
             "admin-id": str(admin_id),
+            "original-filename": self.encode_filename(file.filename, drawing_id),
             "created-at": existing["created-at"],
             "modified-at": now,
         }
@@ -248,16 +376,19 @@ class DrawingsService:
         )
 
     async def get_drawing(self, drawing_id: uuid.UUID) -> tuple[AsyncIterator[bytes], str]:
-        """Verify existence and return a stream for the KMZ drawing.
+        """Verify existence and return a stream and download name for the KMZ drawing.
 
         Performs a head request first so that DrawingNotFoundError is raised
-        before the response stream starts.
+        before the response stream starts, which also yields the filename
+        recorded at the last upload without a second S3 call.
 
         Args:
             drawing_id: The UUID of the drawing to retrieve.
 
         Returns:
-            A tuple of (async byte iterator, s3_key).
+            A tuple of (async byte iterator, download filename). The filename is
+            the one the client used at the last upload, falling back to
+            "{drawing_id}.kmz" for drawings stored before it was recorded.
 
         Raises:
             DrawingNotFoundError: If no drawing exists with the given identifier.
@@ -268,9 +399,68 @@ class DrawingsService:
 
         # Verify the drawing exists before streaming, so that DrawingNotFoundError
         # is raised before the response starts and can be caught by the exception handler.
-        await self._s3.head_drawing(s3_key)
+        existing = await self._s3.head_drawing(s3_key)
+        filename = self.decode_filename(existing.get("original-filename")) or f"{drawing_id}.kmz"
 
-        return self._s3.get_drawing(s3_key), s3_key
+        return self._s3.get_drawing(s3_key), filename
+
+    async def check_auth(self, drawing_id: uuid.UUID, admin_id: uuid.UUID) -> None:
+        """Verify that an admin_id grants write access to an existing drawing.
+
+        Unknown drawings and wrong admin_ids are reported through distinct
+        errors so a client can fall back to opening an existing drawing
+        read-only.
+
+        Args:
+            drawing_id: The UUID of the drawing to check.
+            admin_id: Admin identifier to check against the stored drawing.
+
+        Raises:
+            DrawingNotFoundError: If no drawing exists with the given identifier.
+            AdminIdMismatchError: If the admin_id does not match the stored one.
+            S3Error: If the S3 head request fails.
+
+        """
+        existing = await self._s3.head_drawing(self.build_s3_key(drawing_id))
+        self._authorize(drawing_id, admin_id, existing)
+
+    async def get_drawing_metadata(self, drawing_id: uuid.UUID) -> DrawingsMetadataResponse:
+        """Return a drawing's stored metadata without transferring its content.
+
+        Args:
+            drawing_id: The UUID of the drawing to describe.
+
+        Returns:
+            A response containing the drawing ID, the original upload filename,
+            and the creation/update timestamps. The filename is None for
+            drawings stored before it was recorded.
+
+        Raises:
+            DrawingNotFoundError: If no drawing exists with the given identifier.
+            S3Error: If the S3 head request fails or the stored timestamps are
+                missing or unparsable.
+
+        """
+        s3_key = self.build_s3_key(drawing_id)
+
+        existing = await self._s3.head_drawing(s3_key)
+
+        # Unlike the update path, which reads timestamps it has just written,
+        # this is a read of arbitrarily old objects, so corrupt or pre-existing
+        # metadata is surfaced as a 500 rather than an unhandled KeyError.
+        try:
+            created_at = datetime.fromisoformat(existing["created-at"])
+            modified_at = datetime.fromisoformat(existing["modified-at"])
+        except (KeyError, ValueError) as e:
+            logger.exception("Unusable timestamps in metadata for drawing %s", drawing_id)
+            raise S3Error(f"Unusable timestamps in metadata for drawing {drawing_id}") from e
+
+        return DrawingsMetadataResponse(
+            id=drawing_id,
+            original_filename=self.decode_filename(existing.get("original-filename")),
+            created_at=created_at,
+            modified_at=modified_at,
+        )
 
     async def delete_drawing(self, drawing_id: uuid.UUID, admin_id: uuid.UUID) -> None:
         """Delete a KMZ drawing from S3.
@@ -295,9 +485,7 @@ class DrawingsService:
         # the delete is attempted
         existing = await self._s3.head_drawing(s3_key)
 
-        if existing.get("admin-id") != str(admin_id):
-            logger.warning("admin_id mismatch for drawing %s", drawing_id)
-            raise AdminIdMismatchError
+        self._authorize(drawing_id, admin_id, existing)
 
         await self._s3.delete_drawing(s3_key)
 
