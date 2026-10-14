@@ -10,11 +10,15 @@ from fastapi import APIRouter, Response, status
 from app.core.syntheticz_service import SyntheticzServiceDep
 from app.schemas.checker import Checker
 from app.schemas.syntheticz import Syntheticz, SyntheticzStatus
+from app.settings import get_settings
 from app.version import __version__
+
+settings = get_settings()
 
 INTERNAL_TAG = "Internal"
 
 router = APIRouter(tags=[INTERNAL_TAG])
+router_prefixed = APIRouter(prefix=settings.api_prefix, tags=[INTERNAL_TAG])
 
 
 @router.get("/checker", summary="Kubernetes Probe")
@@ -33,7 +37,7 @@ async def get_checker_ready() -> Checker:
     return Checker(success=True, message="OK", version=__version__)
 
 
-@router.get(
+@router_prefixed.get(
     "/syntheticz",
     summary="Synthetic Check",
     status_code=200,

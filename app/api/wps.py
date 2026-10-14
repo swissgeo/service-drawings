@@ -99,7 +99,7 @@ AUTH_RESPONSES: dict[int | str, dict] = {
 
 
 @router.post(
-    "/drawings",
+    "",
     status_code=201,
     responses={
         400: {"model": ErrorResponse},
@@ -123,7 +123,7 @@ async def create_drawing(
 
 
 @router.get(
-    "/drawings/{drawing_id}",
+    "/{drawing_id}",
     responses={
         404: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
@@ -154,7 +154,7 @@ async def get_drawing(
 
 
 @router.put(
-    "/drawings/{drawing_id}",
+    "/{drawing_id}",
     response_model=DrawingsUpdateResponse,
     responses={
         400: {"model": ErrorResponse},
@@ -183,7 +183,7 @@ async def update_drawing(  # noqa: PLR0913, PLR0917
 
 
 @router.get(
-    "/drawings/{drawing_id}/check-auth",
+    "/{drawing_id}/check-auth",
     status_code=204,
     responses={
         **AUTH_RESPONSES,
@@ -210,7 +210,7 @@ async def check_auth(
 
 
 @router.get(
-    "/drawings/{drawing_id}/metadata",
+    "/{drawing_id}/metadata",
     responses={
         404: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
@@ -235,7 +235,7 @@ async def get_drawing_metadata(
 
 
 @router.delete(
-    "/drawings/{drawing_id}",
+    "/{drawing_id}",
     status_code=204,
     responses={
         **AUTH_RESPONSES,

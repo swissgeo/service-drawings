@@ -25,7 +25,7 @@ _INTERNAL_SPEC_URL = f"/{_INTERNAL_SPEC_PREFIX}/openapi.json"
 _SPEC_URL = "/openapi.json"
 # The public spec is also served next to the drawings routes, so clients that
 # only reach the service through the API prefix can still fetch it.
-_DRAWINGS_SPEC_URL = f"{get_settings().api_prefix}/drawings/openapi.json"
+_DRAWINGS_SPEC_URL = f"{get_settings().api_prefix}/openapi.json"
 
 
 def _iter_routes(app: FastAPI) -> list[Any]:
