@@ -78,4 +78,11 @@ EXPOSE 8000
 
 # Here we use uvicorn directly in order to configure its logging configuration file
 # This can be done by using the CMD arg during docker run.
-ENTRYPOINT ["uvicorn", "app.main:app", "--proxy-headers", "--host", "0.0.0.0", "--loop", "uvloop", "--http", "httptools"]
+#
+# --proxy-headers alone is not enough: it only enables the middleware, while
+# --forwarded-allow-ips declares which peers may set X-Forwarded-*. It defaults to
+# 127.0.0.1, but behind the ALB the peer is the load balancer's private IP, so the
+# default silently drops X-Forwarded-Proto and every generated URL comes out as http.
+# '*' is safe only because the task's security group accepts traffic from the ALB
+# security group only; if that ever changes, pin the VPC CIDR here instead.
+ENTRYPOINT ["uvicorn", "app.main:app", "--proxy-headers", "--forwarded-allow-ips", "*", "--host", "0.0.0.0", "--loop", "uvloop", "--http", "httptools"]

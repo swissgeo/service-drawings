@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     root_path: str = ""
 
     # API settings
-    api_prefix: str = "/api/wps/v1"  # Default WPS API path prefix
+    api_prefix: str = "/api/wps/v1/drawings"  # Default WPS API path prefix
 
     # OpenAPI settings
     publish_openapi_spec: bool = False
@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # CORS settings
     cors_origins: list[str] = []
     cors_origin_regex: str | None = None
-    cors_method: list[str] = ["GET", "POST"]
+    cors_method: list[str] = ["GET", "POST", "PUT", "DELETE"]
     cors_headers: list[str] = ["*"]
     cors_max_age: int = 600
 
@@ -101,7 +101,8 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:  # pragma: no cover
     """Return the cached singleton Settings instance."""
-    return Settings()  # ty: ignore[missing-argument] for production we don't pass parameter we use environment variable
+    # for production we don't pass parameter, we use environment variables
+    return Settings()
 
 
 SettingsDep = Annotated[

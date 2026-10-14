@@ -15,6 +15,8 @@ from app.settings import SettingsDep
 
 logger = logging.getLogger(__name__)
 
+CACHE_CONTROL_NO_STORE = "no-store, max-age=0"
+
 
 class S3Service:
     """Async S3 client wrapper for KMZ drawing storage."""
@@ -24,9 +26,9 @@ class S3Service:
         self._bucket = bucket
 
     async def upload_drawing(
-        self, key: str, fileobj: BinaryIO, content_type: str, sha256: str
+        self, key: str, fileobj: BinaryIO, content_type: str, metadata: dict[str, str]
     ) -> None:
-        """Upload a KMZ file to S3 with SHA-256 metadata.
+        """Upload a KMZ file to S3 with the given metadata.
 
         Streams the file object without loading it into memory.
 
@@ -34,7 +36,8 @@ class S3Service:
             key: S3 object key (e.g. "drawings/{uuid}.kmz")
             fileobj: Open seekable binary file object to upload
             content_type: MIME type (application/vnd.google-earth.kmz)
-            sha256: Hex digest of the content
+            metadata: Dict of S3 metadata (sha256, admin-id,
+                original-filename, created-at, modified-at)
 
         Raises:
             S3Error: If the S3 upload fails
@@ -47,7 +50,8 @@ class S3Service:
                 Key=key,
                 ExtraArgs={
                     "ContentType": content_type,
-                    "Metadata": {"sha256": sha256},
+                    "CacheControl": CACHE_CONTROL_NO_STORE,
+                    "Metadata": metadata,
                 },
             )
         except botocore.exceptions.BotoCoreError as e:
@@ -76,7 +80,8 @@ class S3Service:
             error_code = e.response["Error"]["Code"]
             status_code = e.response["ResponseMetadata"]["HTTPStatusCode"]
             if error_code == "NoSuchKey" or status_code == HTTPStatus.NOT_FOUND:
-                raise DrawingNotFoundError(f"Drawing not found: {key}") from e
+                logger.info("Drawing not found for key %s", key)
+                raise DrawingNotFoundError from e
             logger.exception("S3 read failed for key %s", key)
             raise S3Error(f"S3 read failed for key {key}: {e}") from e
         except botocore.exceptions.BotoCoreError as e:
@@ -107,7 +112,8 @@ class S3Service:
             error_code = e.response["Error"]["Code"]
             status_code = e.response["ResponseMetadata"]["HTTPStatusCode"]
             if error_code == "NoSuchKey" or status_code == HTTPStatus.NOT_FOUND:
-                raise DrawingNotFoundError(f"Drawing not found: {key}") from e
+                logger.info("Drawing not found for key %s", key)
+                raise DrawingNotFoundError from e
             logger.exception("S3 head failed for key %s", key)
             raise S3Error(f"S3 head failed for key {key}: {e}") from e
         except botocore.exceptions.BotoCoreError as e:
@@ -115,6 +121,22 @@ class S3Service:
             raise S3Error(f"S3 head failed for key {key}: {e}") from e
         else:
             return metadata
+
+    async def delete_drawing(self, key: str) -> None:
+        """Delete a KMZ file from S3.
+
+        Args:
+            key: S3 object key
+
+        Raises:
+            S3Error: If the S3 delete fails
+
+        """
+        try:
+            await self._client.delete_object(Bucket=self._bucket, Key=key)
+        except botocore.exceptions.BotoCoreError as e:
+            logger.exception("S3 delete failed for key %s", key)
+            raise S3Error(f"S3 delete failed for key {key}: {e}") from e
 
     async def check_bucket(self) -> bool:
         """Check whether the configured S3 bucket is accessible.

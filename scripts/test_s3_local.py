@@ -2,9 +2,10 @@
 
 Usage:
     make start-moto          # ensure moto is running
-    uv run python3 scripts/test_s3_local.py
+    uv run python scripts/test_s3_local.py ./france.kmz
 """
 
+import argparse
 import asyncio
 import hashlib
 import io
@@ -26,10 +27,21 @@ from app.core.s3 import S3Service
 
 ENDPOINT = os.environ.get("AWS_S3_ENDPOINT_URL", "http://localhost:5000")
 BUCKET = os.environ.get("AWS_S3_BUCKET_NAME", "service-drawings-local")
-TEST_FILE = "France.kmz"
 
 
-async def main() -> None:
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Smoke-test S3Service against a local moto server."
+    )
+    parser.add_argument(
+        "file",
+        help="Path to the KMZ file to upload",
+    )
+    return parser.parse_args()
+
+
+async def main(file_path: str) -> None:  # noqa: PLR0915
     import aioboto3  # noqa: PLC0415
 
     session = aioboto3.Session()
@@ -37,7 +49,7 @@ async def main() -> None:
         svc = S3Service(client=client, bucket=BUCKET)
 
         # Read test KMZ
-        with open(TEST_FILE, "rb") as f:
+        with open(file_path, "rb") as f:
             data = f.read()
 
         sha256 = hashlib.sha256(data).hexdigest()
@@ -46,14 +58,22 @@ async def main() -> None:
 
         print(f"Bucket:   {BUCKET}")
         print(f"Endpoint: {ENDPOINT}")
-        print(f"File:     {TEST_FILE} ({len(data):,} bytes)")
+        print(f"File:     {file_path} ({len(data):,} bytes)")
         print(f"SHA-256:  {sha256}")
         print(f"Key:      {key}")
         print()
 
         # Upload
         print("1. upload_drawing ...", end=" ", flush=True)
-        await svc.upload_drawing(key, io.BytesIO(data), "application/vnd.google-earth.kmz", sha256)
+        metadata = {
+            "sha256": sha256,
+            "admin-id": str(uuid.uuid4()),
+            "created-at": "2026-01-01T00:00:00+00:00",
+            "modified-at": "2026-01-01T00:00:00+00:00",
+        }
+        await svc.upload_drawing(
+            key, io.BytesIO(data), "application/vnd.google-earth.kmz", metadata
+        )
         print("OK")
 
         # Head (metadata)
@@ -86,9 +106,23 @@ async def main() -> None:
         except DrawingNotFoundError:
             print("OK (DrawingNotFoundError)")
 
+        # Delete
+        print("6. delete_drawing ...", end=" ", flush=True)
+        await svc.delete_drawing(key)
+        print("OK")
+
+        # Head after delete (should be gone)
+        print("7. head_drawing (after delete) ...", end=" ", flush=True)
+        try:
+            await svc.head_drawing(key)
+            print("FAIL (expected DrawingNotFoundError)")
+        except DrawingNotFoundError:
+            print("OK (DrawingNotFoundError)")
+
         print()
         print("All checks passed ✓")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    args = parse_args()
+    asyncio.run(main(args.file))

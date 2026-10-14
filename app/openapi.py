@@ -2,7 +2,8 @@
 
 Produces two separate OpenAPI schemas: a public one excluding Internal-tagged
 routes and an internal one containing only those routes. Registers dedicated
-Swagger UI and ReDoc endpoints for the internal spec. Strips 422 responses
+Swagger UI and ReDoc endpoints for the internal spec, and serves the public
+spec a second time under the drawings API prefix. Strips 422 responses
 replaced by app-level 400 exception handlers.
 """
 
@@ -10,10 +11,10 @@ import json
 from functools import lru_cache
 from typing import Any
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, routing
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.routing import APIRoute
 
 from app.api.internal import INTERNAL_TAG
@@ -22,6 +23,33 @@ from app.settings import get_settings
 _INTERNAL_SPEC_PREFIX = "internal"
 _INTERNAL_SPEC_URL = f"/{_INTERNAL_SPEC_PREFIX}/openapi.json"
 _SPEC_URL = "/openapi.json"
+# The public spec is also served next to the drawings routes, so clients that
+# only reach the service through the API prefix can still fetch it.
+_DRAWINGS_SPEC_URL = f"{get_settings().api_prefix}/openapi.json"
+
+
+def _iter_routes(app: FastAPI) -> list[Any]:
+    """Return the app routes flattened, one entry per operation.
+
+    Since FastAPI 0.141 / Starlette 1.6, ``include_router`` stores a single lazy
+    ``_IncludedRouter`` in ``app.routes`` instead of flattening the child routes,
+    so iterating ``app.routes`` directly no longer yields the individual
+    ``APIRoute`` objects. ``iter_route_contexts`` resolves those into contexts
+    that expose the effective path and tags (router prefix and tags merged in),
+    and ``get_openapi`` accepts them in place of routes. Older FastAPI versions
+    allowed by our version constraint lack that helper but already flatten the
+    routes, so fall back to plain iteration there.
+    """
+    iter_route_contexts = getattr(routing, "iter_route_contexts", None)
+    if iter_route_contexts is None:  # pragma: no cover - FastAPI < 0.141
+        return list(app.routes)
+    return list(iter_route_contexts(app.routes))
+
+
+def _is_internal(route: Any) -> bool:
+    """Return whether a route (or route context) is tagged as internal."""
+    original = getattr(route, "original_route", route)
+    return isinstance(original, APIRoute) and INTERNAL_TAG in (getattr(route, "tags", None) or [])
 
 
 def _remove_422(schema: dict[str, Any]) -> None:
@@ -31,7 +59,7 @@ def _remove_422(schema: dict[str, Any]) -> None:
 
 
 def _build_default_schema(app: FastAPI) -> dict[str, Any]:
-    routes = [r for r in app.routes if not (isinstance(r, APIRoute) and INTERNAL_TAG in r.tags)]
+    routes = [r for r in _iter_routes(app) if not _is_internal(r)]
     tags = [t for t in (app.openapi_tags or []) if t.get("name") != INTERNAL_TAG]
     schema = get_openapi(
         title=app.title,
@@ -50,7 +78,7 @@ def _build_default_schema(app: FastAPI) -> dict[str, Any]:
 
 
 def _build_internal_schema(app: FastAPI) -> dict[str, Any]:
-    routes = [r for r in app.routes if isinstance(r, APIRoute) and INTERNAL_TAG in r.tags]
+    routes = [r for r in _iter_routes(app) if _is_internal(r)]
     tags = [t for t in (app.openapi_tags or []) if t.get("name") == INTERNAL_TAG]
     schema = get_openapi(
         title=f"{app.title} - Internal",
@@ -71,7 +99,8 @@ def _build_internal_schema(app: FastAPI) -> dict[str, Any]:
 def setup_openapi(app: FastAPI) -> None:
     """Configure split OpenAPI specs and register internal doc endpoints.
 
-    The default spec (/docs, /openapi.json) excludes Internal-tagged routes.
+    The default spec (/docs, /openapi.json) excludes Internal-tagged routes;
+    it is also served under /api/wps/v1/drawings/openapi.json.
     The internal spec (/internal/openapi.json, /internal/docs, /internal/redoc)
     contains only Internal-tagged routes.
 
@@ -93,6 +122,13 @@ def setup_openapi(app: FastAPI) -> None:
         return _internal_schema
 
     app.openapi = custom_openapi  # ty:ignore[invalid-assignment]
+
+    # Registered before the drawings router is included, so it takes precedence
+    # over GET /drawings/{drawing_id}, which would otherwise answer 422.
+    @app.get(_DRAWINGS_SPEC_URL, include_in_schema=False)
+    async def drawings_openapi_schema() -> JSONResponse:
+        # JSONResponse, as FastAPI uses for /openapi.json, so both are byte-identical
+        return JSONResponse(app.openapi())
 
     @app.get(_INTERNAL_SPEC_URL, include_in_schema=False)
     async def internal_openapi_schema() -> Response:

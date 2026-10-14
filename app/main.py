@@ -20,12 +20,16 @@ from fastapi.responses import JSONResponse
 
 from app.api import internal, wps
 from app.api.internal import INTERNAL_TAG
+from app.api.wps import DRAWINGS_TAG
 from app.core.exceptions import (
+    AdminIdMismatchError,
     DigestMismatchError,
     DrawingNotFoundError,
     InvalidKMZError,
+    MissingCredentialsError,
     S3Error,
 )
+from app.core.s3 import CACHE_CONTROL_NO_STORE
 from app.middlewares.body_size import MaxBodySizeMiddleware
 from app.openapi import get_openapi_spec_url, setup_openapi
 from app.otel import initialize_instrumentation, shutdown_otel
@@ -89,6 +93,7 @@ app = FastAPI(
     },
     openapi_url=get_openapi_spec_url(),
     openapi_tags=[
+        {"name": DRAWINGS_TAG, "description": "Drawings management API"},
         {"name": INTERNAL_TAG, "description": "Internal APIs not for external uses"},
     ],
     lifespan=lifespan,
@@ -111,6 +116,36 @@ async def digest_mismatch_handler(_request: Request, exc: DigestMismatchError) -
     return JSONResponse(status_code=400, content={"detail": exc.message})
 
 
+@app.exception_handler(MissingCredentialsError)
+async def missing_credentials_handler(
+    _request: Request, exc: MissingCredentialsError
+) -> JSONResponse:
+    """Handle missing or malformed credentials with a 401 Unauthorized response.
+
+    RFC 9110 requires a 401 to carry a WWW-Authenticate challenge naming the
+    scheme the client should use.
+    """
+    return JSONResponse(
+        status_code=401,
+        content={"detail": exc.message},
+        headers={"WWW-Authenticate": "Bearer", "Cache-Control": CACHE_CONTROL_NO_STORE},
+    )
+
+
+@app.exception_handler(AdminIdMismatchError)
+async def admin_id_mismatch_handler(_request: Request, exc: AdminIdMismatchError) -> JSONResponse:
+    """Handle admin_id mismatch errors with a 403 Forbidden response.
+
+    Like the 401, the answer depends on the Authorization header, so it must
+    never be cached and replayed to a caller holding the right admin_id.
+    """
+    return JSONResponse(
+        status_code=403,
+        content={"detail": exc.message},
+        headers={"Cache-Control": CACHE_CONTROL_NO_STORE},
+    )
+
+
 @app.exception_handler(DrawingNotFoundError)
 async def drawing_not_found_handler(_request: Request, exc: DrawingNotFoundError) -> JSONResponse:
     """Handle missing drawing errors with a 404 Not Found response."""
@@ -120,7 +155,7 @@ async def drawing_not_found_handler(_request: Request, exc: DrawingNotFoundError
 @app.exception_handler(S3Error)
 async def s3_error_handler(_request: Request, exc: S3Error) -> JSONResponse:
     """Handle S3 operation errors with a 500 Internal Server Error response."""
-    logger.exception("S3 operation failed: %s", exc.message)
+    logger.error("S3 operation failed: %s", exc.message)
     return JSONResponse(status_code=500, content={"detail": "Storage operation failed"})
 
 
@@ -139,6 +174,7 @@ app.add_middleware(
 
 # Register routes
 app.include_router(internal.router)
+app.include_router(internal.router_prefixed)
 app.include_router(wps.router)
 
 

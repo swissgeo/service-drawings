@@ -1,12 +1,15 @@
 """Pydantic models for drawings API responses.
 
-Defines the response schema returned after successful KMZ drawing creation,
-containing the drawing identifier, admin identifier, and CloudFront URL.
+Defines the response schemas returned after successful KMZ drawing creation
+and update, containing the drawing identifier, admin identifier, S3 URL, and
+timestamps, as well as the schema for the metadata lookup. The check-auth
+endpoint answers with a bare status code and so has no schema.
 """
 
+from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl
 
 
 class DrawingsCreateResponse(BaseModel):
@@ -14,11 +17,63 @@ class DrawingsCreateResponse(BaseModel):
 
     Attributes:
         id: Unique drawing identifier (UUID4).
-        admin_id: Placeholder admin identifier reserved for future auth (UUID4).
-        http_url: HTTP URL where the KMZ file can be accessed.
+        admin_id: Admin identifier required to update the drawing.
+        s3_url: HTTP URL where the KMZ file can be accessed.
 
     """
 
     id: UUID
     admin_id: UUID
     s3_url: HttpUrl
+
+
+class DrawingsUpdateResponse(DrawingsCreateResponse):
+    """Response model returned after a successful drawing update.
+
+    Extends the creation response with creation and last-update timestamps.
+
+    Attributes:
+        created_at: UTC ISO-8601 timestamp of the initial upload.
+        modified_at: UTC ISO-8601 timestamp of the last update.
+
+    """
+
+    created_at: datetime = Field(
+        description="Creation timestamp",
+        examples=["2026-01-01T12:00:00+00:00"],
+    )
+    modified_at: datetime = Field(
+        description="Last update timestamp",
+        examples=["2026-01-01T12:00:00+00:00"],
+    )
+
+
+class DrawingsMetadataResponse(BaseModel):
+    """Response model describing a stored drawing without transferring its content.
+
+    Attributes:
+        id: Unique drawing identifier (UUID4).
+        original_filename: Name of the file as sent by the client on the last
+            upload, or None for drawings stored before this was recorded.
+        created_at: UTC ISO-8601 timestamp of the initial upload.
+        modified_at: UTC ISO-8601 timestamp of the last update.
+
+    """
+
+    id: UUID = Field(
+        description="Unique drawing identifier",
+        examples=["f0c4d7a2-9b1e-4c3d-8a5f-2e6b7c8d9e0f"],
+    )
+    original_filename: str | None = Field(
+        default=None,
+        description=("Name of the uploaded file as provided by the client, or null when unknown"),
+        examples=["France.kmz"],
+    )
+    created_at: datetime = Field(
+        description="Creation timestamp",
+        examples=["2026-01-01T12:00:00+00:00"],
+    )
+    modified_at: datetime = Field(
+        description="Last update timestamp",
+        examples=["2026-01-01T12:00:00+00:00"],
+    )
