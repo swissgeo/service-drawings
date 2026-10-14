@@ -174,6 +174,7 @@ app.add_middleware(
 
 # Register routes
 app.include_router(internal.router)
+app.include_router(internal.router_prefixed)
 app.include_router(wps.router)
 
 

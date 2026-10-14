@@ -14,7 +14,7 @@ from app.version import __version__
 
 def test_api_syntheticz_endpoint_up(client: TestClient):
     """GET /syntheticz returns 200 with UP status when the S3 bucket is reachable."""
-    response = client.get("/syntheticz")
+    response = client.get("/api/wps/v1/drawings/syntheticz")
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "no-store"
     assert response.json() == {
@@ -30,7 +30,7 @@ def test_api_syntheticz_endpoint_bucket_missing(
     """GET /syntheticz returns 500 with DOWN status when the S3 bucket does not exist."""
     s3_client.delete_bucket(Bucket=settings.aws_s3_bucket_name)
 
-    response = client.get("/syntheticz")
+    response = client.get("/api/wps/v1/drawings/syntheticz")
     assert response.status_code == 500
     assert response.headers["Cache-Control"] == "no-store"
     data = response.json()
@@ -46,7 +46,7 @@ def test_api_syntheticz_endpoint_s3_exception(client: TestClient, settings: Sett
     client.app.dependency_overrides[get_syntheticz_service] = lambda: SyntheticzService(broken_s3)  # type: ignore  # noqa: PGH003
 
     try:
-        response = client.get("/syntheticz")
+        response = client.get("/api/wps/v1/drawings/syntheticz")
         assert response.status_code == 500
         assert response.headers["Cache-Control"] == "no-store"
         data = response.json()

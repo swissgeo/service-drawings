@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     root_path: str = ""
 
     # API settings
-    api_prefix: str = "/api/wps/v1"  # Default WPS API path prefix
+    api_prefix: str = "/api/wps/v1/drawings"  # Default WPS API path prefix
 
     # OpenAPI settings
     publish_openapi_spec: bool = False
