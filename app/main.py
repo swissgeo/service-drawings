@@ -123,12 +123,12 @@ async def missing_credentials_handler(
     """Handle missing or malformed credentials with a 401 Unauthorized response.
 
     RFC 9110 requires a 401 to carry a WWW-Authenticate challenge naming the
-    scheme the client should use.
+    scheme the client should use; it names the Swissgeo-Admin-Id header.
     """
     return JSONResponse(
         status_code=401,
         content={"detail": exc.message},
-        headers={"WWW-Authenticate": "Bearer", "Cache-Control": CACHE_CONTROL_NO_STORE},
+        headers={"WWW-Authenticate": "Swissgeo-Admin-Id", "Cache-Control": CACHE_CONTROL_NO_STORE},
     )
 
 
@@ -136,7 +136,7 @@ async def missing_credentials_handler(
 async def admin_id_mismatch_handler(_request: Request, exc: AdminIdMismatchError) -> JSONResponse:
     """Handle admin_id mismatch errors with a 403 Forbidden response.
 
-    Like the 401, the answer depends on the Authorization header, so it must
+    Like the 401, the answer depends on the Swissgeo-Admin-Id header, so it must
     never be cached and replayed to a caller holding the right admin_id.
     """
     return JSONResponse(

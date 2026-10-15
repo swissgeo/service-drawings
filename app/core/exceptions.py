@@ -35,11 +35,11 @@ class DigestMismatchError(ServiceDrawingsError):
 
 
 class MissingCredentialsError(ServiceDrawingsError):
-    """Raised when a request lacks a usable "Authorization: Bearer <admin_id>" header."""
+    """Raised when a request lacks a usable "Swissgeo-Admin-Id: <admin_id>" header."""
 
     def __init__(self, message: str | None = None) -> None:
         super().__init__(
-            message or "Missing or malformed Authorization header, expected 'Bearer <admin_id>'"
+            message or "Missing or malformed Swissgeo-Admin-Id header, expected a UUID"
         )
 
 

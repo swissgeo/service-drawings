@@ -162,13 +162,14 @@ def test_public_spec_has_get_error_responses(client: TestClient):
         assert "$ref" in schema
 
 
-def test_public_spec_declares_admin_id_bearer_scheme(client: TestClient):
-    """Verify routes taking an admin_id declare the bearer scheme and its error responses."""
+def test_public_spec_declares_admin_id_header_scheme(client: TestClient):
+    """Verify routes taking an admin_id declare the header scheme and its error responses."""
     spec = client.get("openapi.json").json()
 
     scheme = spec["components"]["securitySchemes"]["AdminId"]
-    assert scheme["type"] == "http"
-    assert scheme["scheme"] == "bearer"
+    assert scheme["type"] == "apiKey"
+    assert scheme["in"] == "header"
+    assert scheme["name"] == "Swissgeo-Admin-Id"
 
     paths = spec["paths"]
     protected = [
