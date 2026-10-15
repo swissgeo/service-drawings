@@ -20,8 +20,8 @@ from app.core.exceptions import S3Error
 
 
 def _auth(admin_id: object) -> dict[str, str]:
-    """Return the Authorization header carrying the given admin_id as a bearer token."""
-    return {"Authorization": f"Bearer {admin_id}"}
+    """Return the Swissgeo-Admin-Id header carrying the given admin_id."""
+    return {"Swissgeo-Admin-Id": str(admin_id)}
 
 
 def _sha256(data: bytes) -> str:
@@ -367,13 +367,13 @@ def test_delete_drawing_not_found(client: TestClient):
     assert "detail" in response.json()
 
 
-def test_delete_drawing_missing_authorization(client: TestClient, valid_kmz_bytes: bytes):
-    """DELETE without an Authorization header returns 401 and does not delete."""
+def test_delete_drawing_missing_admin_id_header(client: TestClient, valid_kmz_bytes: bytes):
+    """DELETE without a Swissgeo-Admin-Id header returns 401 and does not delete."""
     drawing_id, _ = _create(client, valid_kmz_bytes)
 
     response = client.delete(f"/api/wps/v1/drawings/{drawing_id}")
     assert response.status_code == 401
-    assert response.headers["www-authenticate"] == "Bearer"
+    assert response.headers["www-authenticate"] == "Swissgeo-Admin-Id"
     assert client.get(f"/api/wps/v1/drawings/{drawing_id}").status_code == 200
 
 
@@ -466,38 +466,47 @@ def test_check_auth_after_delete(client: TestClient, valid_kmz_bytes: bytes):
     "headers",
     [
         {},
-        {"Authorization": ""},
-        {"Authorization": "Bearer"},
-        {"Authorization": "Bearer not-a-uuid"},
-        {"Authorization": "Basic dXNlcjpwYXNz"},
+        {"Swissgeo-Admin-Id": ""},
+        {"Swissgeo-Admin-Id": "not-a-uuid"},
     ],
-    ids=["absent", "empty", "no-token", "not-a-uuid", "wrong-scheme"],
+    ids=["absent", "empty", "not-a-uuid"],
 )
-def test_check_auth_missing_or_malformed_authorization(
+def test_check_auth_missing_or_malformed_admin_id_header(
     client: TestClient, valid_kmz_bytes: bytes, headers: dict[str, str]
 ):
-    """A missing or unusable Authorization header answers 401 with a Bearer challenge."""
+    """A missing or unusable Swissgeo-Admin-Id header answers 401 with a challenge."""
     drawing_id, _ = _create(client, valid_kmz_bytes)
 
     response = client.get(f"/api/wps/v1/drawings/{drawing_id}/check-auth", headers=headers)
     assert response.status_code == 401
-    assert response.headers["www-authenticate"] == "Bearer"
+    assert response.headers["www-authenticate"] == "Swissgeo-Admin-Id"
     assert "detail" in response.json()
 
 
-def test_check_auth_scheme_is_case_insensitive(client: TestClient, valid_kmz_bytes: bytes):
-    """The auth scheme is case-insensitive per RFC 9110 section 11.1."""
+def test_check_auth_header_name_is_case_insensitive(client: TestClient, valid_kmz_bytes: bytes):
+    """Header names are case-insensitive per RFC 9110 section 5.1."""
     drawing_id, admin_id = _create(client, valid_kmz_bytes)
 
     response = client.get(
         f"/api/wps/v1/drawings/{drawing_id}/check-auth",
-        headers={"Authorization": f"bearer {admin_id}"},
+        headers={"swissgeo-admin-id": admin_id},
     )
     assert response.status_code == 204
 
 
+def test_bearer_authorization_is_no_longer_honoured(client: TestClient, valid_kmz_bytes: bytes):
+    """The admin_id is only read from Swissgeo-Admin-Id, not from Authorization: Bearer."""
+    drawing_id, admin_id = _create(client, valid_kmz_bytes)
+
+    response = client.get(
+        f"/api/wps/v1/drawings/{drawing_id}/check-auth",
+        headers={"Authorization": f"Bearer {admin_id}"},
+    )
+    assert response.status_code == 401
+
+
 def test_check_auth_answers_are_not_cacheable(client: TestClient, valid_kmz_bytes: bytes):
-    """Every answer that depends on the Authorization header is marked no-store.
+    """Every answer that depends on the Swissgeo-Admin-Id header is marked no-store.
 
     Otherwise a cache keyed on the URL alone could replay one caller's 204 to a
     caller with a wrong admin_id, or a 403 to one with the right admin_id.
@@ -514,20 +523,19 @@ def test_check_auth_answers_are_not_cacheable(client: TestClient, valid_kmz_byte
 @pytest.mark.parametrize(
     ("headers", "expected_log"),
     [
-        ({}, "Missing or non-Bearer Authorization header"),
-        ({"Authorization": "Basic c2VjcmV0LXRva2Vu"}, "Missing or non-Bearer Authorization header"),
-        ({"Authorization": "Bearer secret-token"}, "Bearer token is not a UUID"),
+        ({}, "Missing Swissgeo-Admin-Id header"),
+        ({"Swissgeo-Admin-Id": "secret-token"}, "Swissgeo-Admin-Id header is not a UUID"),
     ],
-    ids=["absent", "wrong-scheme", "not-a-uuid"],
+    ids=["absent", "not-a-uuid"],
 )
-def test_unusable_authorization_is_logged_without_token(
+def test_unusable_admin_id_header_is_logged_without_value(
     client: TestClient,
     valid_kmz_bytes: bytes,
     caplog: pytest.LogCaptureFixture,
     headers: dict[str, str],
     expected_log: str,
 ):
-    """A rejected Authorization header is logged at info level, never its value."""
+    """A rejected Swissgeo-Admin-Id header is logged at info level, never its value."""
     drawing_id, _ = _create(client, valid_kmz_bytes)
 
     with caplog.at_level(logging.INFO, logger="app.api.wps"):
@@ -539,7 +547,6 @@ def test_unusable_authorization_is_logged_without_token(
     assert expected_log in records[0].getMessage()
     assert f"/api/wps/v1/drawings/{drawing_id}/check-auth" in records[0].getMessage()
     assert "secret" not in caplog.text
-    assert "c2VjcmV0LXRva2Vu" not in caplog.text
 
 
 def test_check_auth_invalid_uuid(client: TestClient):

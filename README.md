@@ -72,13 +72,13 @@ curl -sS -X POST \
 
 The `admin_id` is the secret token required to update or delete the drawing. Keep it safe.
 
-Every endpoint that needs it takes it as a bearer token in the `Authorization` header — never in the URL or the body — which keeps it out of access logs and browser history:
+Every endpoint that needs it takes it in the `Swissgeo-Admin-Id` header — never in the URL or the body — which keeps it out of access logs and browser history. A custom header is used rather than `Authorization: Bearer` so it does not conflict with OAuth2-proxy/JWT authentication or a later move to user accounts:
 
 ```
-Authorization: Bearer b1a5c8e3-...
+Swissgeo-Admin-Id: b1a5c8e3-...
 ```
 
-On those endpoints (`PUT` and `DELETE` on a drawing, and `check-auth`) a missing or malformed header (absent, another scheme, or a token that is not a UUID) answers `401` with `WWW-Authenticate: Bearer`, an unknown `drawing_id` answers `404`, and a wrong `admin_id` for an existing drawing answers `403`.
+On those endpoints (`PUT` and `DELETE` on a drawing, and `check-auth`) a missing or malformed header (absent, empty, or a value that is not a UUID) answers `401` with `WWW-Authenticate: Swissgeo-Admin-Id`, an unknown `drawing_id` answers `404`, and a wrong `admin_id` for an existing drawing answers `403`.
 
 ### Download a drawing
 
@@ -105,13 +105,13 @@ Because the name comes from the *last* upload, and `PUT` skips the S3 write when
 
 `PUT /api/wps/v1/drawings/{drawing_id}`
 
-Overwrites an existing drawing at the same S3 key. Requires the `admin_id` returned at creation as a bearer token; a wrong one is rejected with `403`. If the new content is identical to the stored one, the request succeeds without re-upload.
+Overwrites an existing drawing at the same S3 key. Requires the `admin_id` returned at creation in the `Swissgeo-Admin-Id` header; a wrong one is rejected with `403`. If the new content is identical to the stored one, the request succeeds without re-upload.
 
 ```bash
 SHA256=$(sha256sum -b France.kmz | awk '{print $1}')
 
 curl -sS -X PUT \
-  -H "Authorization: Bearer b1a5c8e3-..." \
+  -H "Swissgeo-Admin-Id: b1a5c8e3-..." \
   -F "file=@France.kmz" \
   -F "sha256=$SHA256" \
   http://localhost:8000/api/wps/v1/drawings/f0c4d7a2-...
@@ -133,11 +133,11 @@ curl -sS -X PUT \
 
 `DELETE /api/wps/v1/drawings/{drawing_id}`
 
-Permanently deletes a drawing. Requires the `admin_id` as a bearer token; a wrong one is rejected with `403`. The deletion is irreversible.
+Permanently deletes a drawing. Requires the `admin_id` in the `Swissgeo-Admin-Id` header; a wrong one is rejected with `403`. The deletion is irreversible.
 
 ```bash
 curl -sS -X DELETE \
-  -H "Authorization: Bearer b1a5c8e3-..." \
+  -H "Swissgeo-Admin-Id: b1a5c8e3-..." \
   http://localhost:8000/api/wps/v1/drawings/f0c4d7a2-...
 ```
 
@@ -147,20 +147,20 @@ curl -sS -X DELETE \
 
 `GET /api/wps/v1/drawings/{drawing_id}/check-auth`
 
-Reports whether the `admin_id` sent as a bearer token grants write access to the drawing, without transferring the file. The answer is carried by the status code alone, and distinguishes the two failure cases so a client can decide in one request whether to open the drawing for editing, open it read-only, or report it missing:
+Reports whether the `admin_id` sent in the `Swissgeo-Admin-Id` header grants write access to the drawing, without transferring the file. The answer is carried by the status code alone, and distinguishes the two failure cases so a client can decide in one request whether to open the drawing for editing, open it read-only, or report it missing:
 
 | Status | Meaning |
 |--------|---------|
 | `204 No Content` | The drawing exists and the `admin_id` matches |
-| `401 Unauthorized` | No usable `Authorization: Bearer <admin_id>` header |
+| `401 Unauthorized` | No usable `Swissgeo-Admin-Id: <admin_id>` header |
 | `403 Forbidden` | The drawing exists but the `admin_id` does not match |
 | `404 Not Found` | The drawing does not exist |
 
-Every answer that depends on the `Authorization` header (`204`, `401`, `403`) carries `Cache-Control: no-store`, so a cache in front of the service can never replay one caller's answer to another.
+Every answer that depends on the `Swissgeo-Admin-Id` header (`204`, `401`, `403`) carries `Cache-Control: no-store`, so a cache in front of the service can never replay one caller's answer to another.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' \
-  -H "Authorization: Bearer b1a5c8e3-..." \
+  -H "Swissgeo-Admin-Id: b1a5c8e3-..." \
   http://localhost:8000/api/wps/v1/drawings/f0c4d7a2-.../check-auth
 ```
 
@@ -229,7 +229,7 @@ Application errors follow a uniform `{"detail": "<message>"}` body. The `422` st
 | Status | Meaning |
 |--------|---------|
 | `400` | Invalid KMZ file (not a valid zip) or SHA-256 digest mismatch |
-| `401` | Missing or malformed `Authorization: Bearer <admin_id>` header (carries `WWW-Authenticate: Bearer`) |
+| `401` | Missing or malformed `Swissgeo-Admin-Id: <admin_id>` header (carries `WWW-Authenticate: Swissgeo-Admin-Id`) |
 | `403` | `admin_id` does not match the stored drawing metadata (on `PUT`, `DELETE` and `check-auth`) |
 | `404` | Drawing not found |
 | `413` | Uploaded body exceeds the maximum size (5 MB by default, configurable via `MAX_UPLOAD_SIZE_BYTES`) |
@@ -268,7 +268,7 @@ Two standalone smoke tests live in `scripts/`. They validate the service without
 
 ### `scripts/smoke_test_drawings_api.sh`
 
-End-to-end API smoke test. It generates sample KMZ files, starts a dev server, and exercises the full HTTP surface of the API: health endpoints, upload (valid/invalid/oversized), download (content-type, `Content-Disposition` filename, byte-for-byte match), update (wrong `admin_id` → 403, missing `Authorization` → 401, missing drawing, unchanged content short-circuit), `check-auth` (matching pair → 204, wrong `admin_id` → 403, unknown drawing → 404, missing or non-UUID token → 401 with a `Bearer` challenge, `no-store` on auth-dependent answers), `metadata` (filename + timestamps without any `Authorization` header, `no-store`, 404), delete (403/404, that an `admin_id` sent as a form field is no longer honoured, that rejected deletes leave the drawing intact, and that both `check-auth` and `metadata` answer 404 afterwards), and OpenAPI spec exposure.
+End-to-end API smoke test. It generates sample KMZ files, starts a dev server, and exercises the full HTTP surface of the API: health endpoints, upload (valid/invalid/oversized), download (content-type, `Content-Disposition` filename, byte-for-byte match), update (wrong `admin_id` → 403, missing `Swissgeo-Admin-Id` → 401, missing drawing, unchanged content short-circuit), `check-auth` (matching pair → 204, wrong `admin_id` → 403, unknown drawing → 404, missing or non-UUID header → 401 with a `Swissgeo-Admin-Id` challenge, `no-store` on auth-dependent answers), `metadata` (filename + timestamps without any `Swissgeo-Admin-Id` header, `no-store`, 404), delete (403/404, that an `admin_id` sent as a form field or as an `Authorization: Bearer` token is no longer honoured, that rejected deletes leave the drawing intact, and that both `check-auth` and `metadata` answer 404 afterwards), and OpenAPI spec exposure.
 
 ```bash
 make start-moto                                  # required: local S3 emulator
