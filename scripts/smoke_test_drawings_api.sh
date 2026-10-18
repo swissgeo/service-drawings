@@ -304,7 +304,7 @@ echo -e "\n${BOLD}=== PUT /api/wps/v1/drawings/{id} ===${NC}"
 WRONG_ADMIN_ID="00000000-0000-0000-0000-000000000001"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
-    -H "Authorization: Bearer $WRONG_ADMIN_ID" \
+    -H "Swissgeo-Admin-Id: $WRONG_ADMIN_ID" \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
@@ -314,17 +314,17 @@ HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
-assert_status "Without Authorization header → 401" 401 "$HTTP"
+assert_status "Without Swissgeo-Admin-Id header → 401" 401 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
-    -H "Authorization: Bearer $ADMIN_ID" \
+    -H "Swissgeo-Admin-Id: $ADMIN_ID" \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
     "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000")
 assert_status "Update non-existent drawing → 404" 404 "$HTTP"
 
 RESP=$(curl -s -w '\n%{http_code}' -X PUT \
-    -H "Authorization: Bearer $ADMIN_ID" \
+    -H "Swissgeo-Admin-Id: $ADMIN_ID" \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
@@ -340,7 +340,7 @@ fi
 
 # Unchanged content short-circuits with 200 (no re-upload)
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
-    -H "Authorization: Bearer $ADMIN_ID" \
+    -H "Swissgeo-Admin-Id: $ADMIN_ID" \
     -F "file=@$TMPDIR/valid2.kmz" \
     -F "sha256=$(sha256_of "$TMPDIR/valid2.kmz")" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
@@ -366,7 +366,7 @@ assert_header \
 echo -e "\n${BOLD}=== GET /api/wps/v1/drawings/{id}/check-auth ===${NC}"
 
 RESP=$(curl -s -w '\n%{http_code}' \
-    -H "Authorization: Bearer $ADMIN_ID" \
+    -H "Swissgeo-Admin-Id: $ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth")
 BODY="$(echo "$RESP" | sed '$d')"
 HTTP="$(echo "$RESP" | tail -n 1)"
@@ -378,38 +378,38 @@ else
 fi
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer $WRONG_ADMIN_ID" \
+    -H "Swissgeo-Admin-Id: $WRONG_ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth")
 assert_status "Existing drawing, wrong admin_id → 403" 403 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer $ADMIN_ID" \
+    -H "Swissgeo-Admin-Id: $ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000/check-auth")
 assert_status "Unknown drawing → 404" 404 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth")
-assert_status "Without Authorization header → 401" 401 "$HTTP"
+assert_status "Without Swissgeo-Admin-Id header → 401" 401 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer not-a-uuid" \
+    -H "Swissgeo-Admin-Id: not-a-uuid" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth")
-assert_status "Bearer token that is not a UUID → 401" 401 "$HTTP"
+assert_status "Swissgeo-Admin-Id that is not a UUID → 401" 401 "$HTTP"
 
 assert_header \
-    "  401 carries a Bearer challenge" \
+    "  401 carries a Swissgeo-Admin-Id challenge" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth" \
     "www-authenticate" \
-    "Bearer"
+    "Swissgeo-Admin-Id"
 
-# The answer depends on the Authorization header, so no cache may replay it.
+# The answer depends on the Swissgeo-Admin-Id header, so no cache may replay it.
 assert_header \
     "  401 is marked Cache-Control: no-store" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth" \
     "cache-control" \
     "no-store, max-age=0"
 
-if curl -s -o /dev/null -D - -H "Authorization: Bearer $ADMIN_ID" \
+if curl -s -o /dev/null -D - -H "Swissgeo-Admin-Id: $ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth" \
     | tr -d '\r' | grep -qi '^cache-control: no-store, max-age=0$'; then
     pass "  204 is marked Cache-Control: no-store"
@@ -420,7 +420,7 @@ fi
 # --- GET /api/wps/v1/drawings/{id}/metadata ---
 echo -e "\n${BOLD}=== GET /api/wps/v1/drawings/{id}/metadata ===${NC}"
 
-# Public, like the download: no Authorization header needed.
+# Public, like the download: no Swissgeo-Admin-Id header needed.
 RESP=$(curl -s -w '\n%{http_code}' \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/metadata")
 BODY="$(echo "$RESP" | sed '$d')"
@@ -450,12 +450,12 @@ assert_status "Metadata for non-existent drawing → 404" 404 "$HTTP"
 echo -e "\n${BOLD}=== DELETE /api/wps/v1/drawings/{id} ===${NC}"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
-    -H "Authorization: Bearer $WRONG_ADMIN_ID" \
+    -H "Swissgeo-Admin-Id: $WRONG_ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 assert_status "Wrong admin_id → 403" 403 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
-    -H "Authorization: Bearer $ADMIN_ID" \
+    -H "Swissgeo-Admin-Id: $ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/00000000-0000-0000-0000-000000000000")
 assert_status "Delete non-existent drawing → 404" 404 "$HTTP"
 
@@ -465,13 +465,19 @@ HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 assert_status "admin_id as form field instead of header → 401" 401 "$HTTP"
 
+# The former Authorization: Bearer transport no longer counts either.
+HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+    -H "Authorization: Bearer $ADMIN_ID" \
+    "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
+assert_status "admin_id as Bearer token instead of Swissgeo-Admin-Id → 401" 401 "$HTTP"
+
 # A rejected delete must not have deleted anything.
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 assert_status "Drawing survives rejected deletes → 200" 200 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
-    -H "Authorization: Bearer $ADMIN_ID" \
+    -H "Swissgeo-Admin-Id: $ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID")
 assert_status "Delete existing drawing → 204" 204 "$HTTP"
 
@@ -480,7 +486,7 @@ HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
 assert_status "Deleted drawing no longer retrievable → 404" 404 "$HTTP"
 
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer $ADMIN_ID" \
+    -H "Swissgeo-Admin-Id: $ADMIN_ID" \
     "$BASE_URL/api/wps/v1/drawings/$DRAWING_ID/check-auth")
 assert_status "check-auth on deleted drawing → 404" 404 "$HTTP"
 
