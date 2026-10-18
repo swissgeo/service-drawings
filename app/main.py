@@ -22,6 +22,7 @@ from app.api import internal, wps
 from app.api.internal import INTERNAL_TAG
 from app.api.wps import DRAWINGS_TAG
 from app.core.exceptions import (
+    ADMIN_ID_HEADER,
     AdminIdMismatchError,
     DigestMismatchError,
     DrawingNotFoundError,
@@ -128,7 +129,7 @@ async def missing_credentials_handler(
     return JSONResponse(
         status_code=401,
         content={"detail": exc.message},
-        headers={"WWW-Authenticate": "Swissgeo-Admin-Id", "Cache-Control": CACHE_CONTROL_NO_STORE},
+        headers={"WWW-Authenticate": ADMIN_ID_HEADER, "Cache-Control": CACHE_CONTROL_NO_STORE},
     )
 
 

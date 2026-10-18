@@ -6,6 +6,10 @@ identifier mismatch, missing drawings, and S3 errors. Size limits are enforced
 by the body size middleware, so there is no oversized-file exception.
 """
 
+# Header carrying the admin_id; defined here so the API layer and the error
+# messages share one spelling without a circular import.
+ADMIN_ID_HEADER = "Swissgeo-Admin-Id"
+
 
 class ServiceDrawingsError(Exception):
     """Base exception for all service-drawings errors."""
@@ -39,7 +43,7 @@ class MissingCredentialsError(ServiceDrawingsError):
 
     def __init__(self, message: str | None = None) -> None:
         super().__init__(
-            message or "Missing or malformed Swissgeo-Admin-Id header, expected a UUID"
+            message or f"Missing or malformed {ADMIN_ID_HEADER} header, expected a UUID"
         )
 
 

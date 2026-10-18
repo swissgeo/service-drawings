@@ -23,7 +23,7 @@ from fastapi.responses import Response, StreamingResponse
 from fastapi.security import APIKeyHeader
 
 from app.core.drawings import DrawingsService, DrawingsServiceDep
-from app.core.exceptions import MissingCredentialsError
+from app.core.exceptions import ADMIN_ID_HEADER, MissingCredentialsError
 from app.core.s3 import CACHE_CONTROL_NO_STORE
 from app.schemas.drawings import (
     DrawingsCreateResponse,
@@ -60,8 +60,6 @@ KmzFile = Annotated[
 # auto_error is off so that a missing header answers 401 through the service's
 # own error handler, uniformly with a malformed one; the scheme is still
 # declared in the OpenAPI spec.
-ADMIN_ID_HEADER = "Swissgeo-Admin-Id"
-
 admin_id_header = APIKeyHeader(
     name=ADMIN_ID_HEADER,
     auto_error=False,
