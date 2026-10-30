@@ -5,9 +5,11 @@ drawing files stored in S3 and served through CloudFront, plus endpoints to
 check a drawing_id/admin_id pair and to read a drawing's metadata. All routes
 are prefixed with /api/wps/v1 per SWISSGEO API standards.
 
-Routes that need the admin_id take it as an "Authorization: Bearer <admin_id>"
+Routes that need the admin_id take it as a "Swissgeo-Admin-Id: <admin_id>"
 header, which keeps it out of URLs, access logs and browser history while
-letting check-auth be a plain GET. A missing or malformed
+letting check-auth be a plain GET. A custom header rather than
+"Authorization: Bearer" avoids clashing with OAuth2-proxy/JWT or a later move
+to user accounts. A missing or malformed
 header answers 401, an unknown drawing_id 404, and a wrong admin_id for an
 existing drawing 403.
 """
@@ -18,10 +20,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import APIKeyHeader
 
 from app.core.drawings import DrawingsService, DrawingsServiceDep
-from app.core.exceptions import MissingCredentialsError
+from app.core.exceptions import ADMIN_ID_HEADER, MissingCredentialsError
 from app.core.s3 import CACHE_CONTROL_NO_STORE
 from app.schemas.drawings import (
     DrawingsCreateResponse,
@@ -58,34 +60,37 @@ KmzFile = Annotated[
 # auto_error is off so that a missing header answers 401 through the service's
 # own error handler, uniformly with a malformed one; the scheme is still
 # declared in the OpenAPI spec.
-admin_id_bearer = HTTPBearer(
+admin_id_header = APIKeyHeader(
+    name=ADMIN_ID_HEADER,
     auto_error=False,
     scheme_name="AdminId",
-    description="The admin_id returned when the drawing was created, sent as a bearer token.",
+    description=(
+        f"The admin_id returned when the drawing was created, sent in the {ADMIN_ID_HEADER} header."
+    ),
 )
 
 
 async def get_admin_id(
     request: Request,
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(admin_id_bearer)],
+    header: Annotated[str | None, Depends(admin_id_header)],
 ) -> uuid.UUID:
-    """Extract the admin_id from an "Authorization: Bearer <admin_id>" header.
+    """Extract the admin_id from a "Swissgeo-Admin-Id: <admin_id>" header.
 
     Raises:
-        MissingCredentialsError: If the header is absent, uses another scheme,
-            or carries a token that is not a UUID.
+        MissingCredentialsError: If the header is absent, empty, or carries a
+            value that is not a UUID.
 
     """
-    # Logged to ease debugging client integrations; the token itself never is.
-    if credentials is None:
-        logger.info(
-            "Missing or non-Bearer Authorization header on %s %s", request.method, request.url.path
-        )
+    # Logged to ease debugging client integrations; the value itself never is.
+    if header is None:
+        logger.info("Missing %s header on %s %s", ADMIN_ID_HEADER, request.method, request.url.path)
         raise MissingCredentialsError
     try:
-        return uuid.UUID(credentials.credentials)
+        return uuid.UUID(header)
     except ValueError as e:
-        logger.info("Bearer token is not a UUID on %s %s", request.method, request.url.path)
+        logger.info(
+            "%s header is not a UUID on %s %s", ADMIN_ID_HEADER, request.method, request.url.path
+        )
         raise MissingCredentialsError from e
 
 
@@ -173,8 +178,8 @@ async def update_drawing(  # noqa: PLR0913, PLR0917
 ) -> DrawingsUpdateResponse:
     """Update an existing KMZ drawing by overwriting it at the same S3 key.
 
-    Only KMZ files are accepted. The admin_id is sent as "Authorization:
-    Bearer <admin_id>" and must match the stored drawing metadata, otherwise
+    Only KMZ files are accepted. The admin_id is sent as "Swissgeo-Admin-Id:
+    <admin_id>" and must match the stored drawing metadata, otherwise
     the request is rejected with 403. If the new content is identical to the
     stored one, the request succeeds without re-uploading. Returns the drawing
     ID, access token, access URL, and creation/update timestamps.
@@ -202,7 +207,7 @@ async def check_auth(
     the drawing does not exist. A client can therefore fall back to opening an
     existing drawing read-only after a 403 without a second request.
 
-    The answer depends on the Authorization header, so it is marked no-store:
+    The answer depends on the Swissgeo-Admin-Id header, so it is marked no-store:
     a cache keyed on the URL alone must never replay it to another caller.
     """
     await drawings.check_auth(drawing_id, admin_id)
@@ -249,7 +254,7 @@ async def delete_drawing(
 ) -> Response:
     """Delete a KMZ drawing.
 
-    The admin_id is sent as "Authorization: Bearer <admin_id>" and must match
+    The admin_id is sent as "Swissgeo-Admin-Id: <admin_id>" and must match
     the stored drawing metadata, otherwise the request is rejected with 403.
     The deletion is permanent.
     """

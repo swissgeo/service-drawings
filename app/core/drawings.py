@@ -186,7 +186,7 @@ class DrawingsService:
         """
         # Starlette types UploadFile.file as BinaryIO, but it is always a
         # SpooledTemporaryFile, which provides the readinto() that file_digest() needs.
-        computed_digest = hashlib.file_digest(file.file, "sha256").hexdigest()  # ty: ignore[invalid-argument-type]
+        computed_digest = hashlib.file_digest(file.file, "sha256").hexdigest()  # ty: ignore[no-matching-overload]
         size = file.file.tell()
         await file.seek(0)  # reset so upload_fileobj reads from the start
 
